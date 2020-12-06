@@ -5,12 +5,10 @@ from setuptools import setup, find_packages
 setup(
     name='project',
     version='0.0.0',
-    description='Describe Your Cool Project',
-    author='',
-    author_email='',
-    # REPLACE WITH YOUR OWN GITHUB PROJECT LINK
-    url='https://github.com/PyTorchLightning/pytorch-lightning-conference-seed',
+    description='OpenAI Research Project',
+    author='Tyna Eloundou',
+    author_email='mfe25@cornell.edu',
+    url='https://github.com/feloundou/research-project',
     install_requires=['pytorch-lightning'],
     packages=find_packages(),
 )
-
