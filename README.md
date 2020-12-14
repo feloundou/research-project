@@ -50,9 +50,9 @@ This project is setup as a package which means you can now easily import any fil
 ### Citation   
 ```
 @article{Eloundou, Florentine,
-  title={Your Title},
-  author={Your team},
-  journal={Location},
-  year={Year}
+  title={},
+  author={},
+  journal={},
+  year={2020}
 }
 ```   
