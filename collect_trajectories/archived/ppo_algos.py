@@ -119,6 +119,7 @@ class MLPActorCritic(nn.Module):
         # build value function
         self.v = MLPCritic(obs_dim, hidden_sizes, activation)
 
+
     def step(self, obs):
         with torch.no_grad():
             pi = self.pi._distribution(obs)

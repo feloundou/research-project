@@ -4,11 +4,17 @@ print(sys.path)
 
 from torch.optim import Adam
 import gym
-import safety_gym
-from safety_gym.envs.engine import Engine
 
 from spinup_utils import *
 from archived.ppo_algos import *
+
+
+# import '/home/tyna/Documents/openai/spinningup/spinup/algos/pytorch/ppo/core.py' as core
+# import spinup.algos.pytorch.ppo.core as core
+# from spinup.utils.logx import EpochLogger
+# from spinup.utils.mpi_pytorch import setup_pytorch_for_mpi, sync_params, mpi_avg_grads
+# from spinup.utils.mpi_tools import mpi_fork, mpi_avg, proc_id, mpi_statistics_scalar, num_procs
+
 
 class PPOBuffer:
     """
@@ -21,7 +27,7 @@ class PPOBuffer:
     calculates the average of advantage, then descends.
     """
 
-    def __init__(self, obs_dim, act_dim, size, gamma=0.99, lam=0.95, cost_gamma=0.99, cost_lam=0.95):
+    def __init__(self, obs_dim, act_dim, size, gamma=0.99, lam=0.95):
         self.obs_buf = np.zeros(combined_shape(size, obs_dim), dtype=np.float32)
         self.act_buf = np.zeros(combined_shape(size, act_dim), dtype=np.float32)
         self.adv_buf = np.zeros(size, dtype=np.float32)
@@ -29,17 +35,10 @@ class PPOBuffer:
         self.ret_buf = np.zeros(size, dtype=np.float32)
         self.val_buf = np.zeros(size, dtype=np.float32)
         self.logp_buf = np.zeros(size, dtype=np.float32)
-
-        self.cadv_buf = np.zeros(size, dtype=np.float32)    # cost advantage
-        self.cost_buf = np.zeros(size, dtype=np.float32)    # costs
-        self.cret_buf = np.zeros(size, dtype=np.float32)    # cost return
-        self.cval_buf = np.zeros(size, dtype=np.float32)    # cost value
-
         self.gamma, self.lam = gamma, lam
-        self.cost_gamma, self.cost_lam = cost_gamma, cost_lam
         self.ptr, self.path_start_idx, self.max_size = 0, 0, size
 
-    def store(self, obs, act, rew, val, cost, cval, logp):
+    def store(self, obs, act, rew, val, logp):
         """
         Append one timestep of agent-environment interaction to the buffer.
         """
@@ -48,14 +47,10 @@ class PPOBuffer:
         self.act_buf[self.ptr] = act
         self.rew_buf[self.ptr] = rew
         self.val_buf[self.ptr] = val
-
-        self.cost_buf[self.ptr] = cost
-        self.cval_buf[self.ptr] = cval
         self.logp_buf[self.ptr] = logp
-
         self.ptr += 1
 
-    def finish_path(self, last_val=0, last_cval=0):
+    def finish_path(self, last_val=0):
         """
         Call this at the end of a trajectory, or when one gets cut off
         by an epoch ending. This looks back in the buffer to where the
@@ -68,25 +63,18 @@ class PPOBuffer:
         should be V(s_T), the value function estimated for the last state.
         This allows us to bootstrap the reward-to-go calculation to account
         for timesteps beyond the arbitrary episode horizon (or epoch cutoff).
-        :param last_cval:
         """
+
         path_slice = slice(self.path_start_idx, self.ptr)
         rews = np.append(self.rew_buf[path_slice], last_val)
         vals = np.append(self.val_buf[path_slice], last_val)
-        costs = np.append(self.cost_buf[path_slice], last_cval)
-        cvals = np.append(self.cval_buf[path_slice], last_cval)
 
-        # implement GAE-Lambda advantage calculation
+        # the next two lines implement GAE-Lambda advantage calculation
         deltas = rews[:-1] + self.gamma * vals[1:] - vals[:-1]
         self.adv_buf[path_slice] = discount_cumsum(deltas, self.gamma * self.lam)
-        # computes rewards-to-go, to be targets for the value function
-        self.ret_buf[path_slice] = discount_cumsum(rews, self.gamma)[:-1]
 
-        # implement GAE-Lambda advantage for costs
-        cdeltas = costs[:-1] + self.gamma * cvals[1:] - cvals[:-1]
-        self.cadv_buf[path_slice] = discount_cumsum(cdeltas, self.cost_gamma * self.cost_lam)
-        # computes rewards-to-go
-        self.cret_buf[path_slice] = discount_cumsum(costs, self.cost_gamma)[:-1]
+        # the next line computes rewards-to-go, to be targets for the value function
+        self.ret_buf[path_slice] = discount_cumsum(rews, self.gamma)[:-1]
 
         self.path_start_idx = self.ptr
 
@@ -98,17 +86,11 @@ class PPOBuffer:
         """
         assert self.ptr == self.max_size  # buffer has to be full before you can get
         self.ptr, self.path_start_idx = 0, 0
-        # the next four lines implement the advantage normalization trick, for rewards and costs
+        # the next two lines implement the advantage normalization trick
         adv_mean, adv_std = mpi_statistics_scalar(self.adv_buf)
         self.adv_buf = (self.adv_buf - adv_mean) / adv_std
-
-        cadv_mean, _ = mpi_statistics_scalar(self.cadv_buf)
-        # Center, but do NOT rescale advantages for cost gradient # Tyna Note
-        self.cadv_buf -= cadv_mean
-
         data = dict(obs=self.obs_buf, act=self.act_buf, ret=self.ret_buf,
-                    adv=self.adv_buf, logp=self.logp_buf, cadv=self.cadv_buf,
-                    cret=self.cret_buf)
+                    adv=self.adv_buf, logp=self.logp_buf)
         return {k: torch.as_tensor(v, dtype=torch.float32) for k, v in data.items()}
 
 
@@ -161,7 +143,8 @@ def ppo(env_fn, actor_critic=MLPActorCritic, ac_kwargs=dict(), seed=0,
                                            | for the provided observations. (Critical:
                                            | make sure to flatten this!)
             ===========  ================  ======================================
-        ac_kwargs (dict): Any kwargs appropriate for the ActorCritic object you provided to PPO.
+        ac_kwargs (dict): Any kwargs appropriate for the ActorCritic object
+            you provided to PPO.
         seed (int): Seed for random number generators.
         steps_per_epoch (int): Number of steps of interaction (state-action pairs)
             for the agent and the environment in each epoch.
@@ -292,36 +275,19 @@ def ppo(env_fn, actor_critic=MLPActorCritic, ac_kwargs=dict(), seed=0,
 
     # Prepare for interaction with environment
     start_time = time.time()
-    # o, ep_ret, ep_len = env.reset(), 0, 0
-    o, r, d, c, ep_ret, ep_cost, ep_len = env.reset(), 0, False, 0, 0, 0, 0
-    cur_penalty = 0
-    cum_cost = 0
+    o, ep_ret, ep_len = env.reset(), 0, 0
 
     # Main loop: collect experience in env and update/log each epoch
     for epoch in range(epochs):
         for t in range(local_steps_per_epoch):
             a, v, logp = ac.step(torch.as_tensor(o, dtype=torch.float32))
 
-            vc = v # placeholder Tyna Note
-
-            # env.step
-            next_o, r, d, info = env.step(a)
-
-            # Include penalty on cost
-            c = info.get('cost', 0)
-            # print("cost")
-            # print(c)
-
-            # Track cumulative cost over training
-            cum_cost += c
-
+            next_o, r, d, _ = env.step(a)
             ep_ret += r
             ep_len += 1
-            ep_cost += c
 
             # save and log
-            # buf.store(o, a, r, v, logp)
-            buf.store(o, a, r, v, c, vc, logp)
+            buf.store(o, a, r, v, logp)
             logger.store(VVals=v)
 
             # Update obs (critical!)
@@ -340,13 +306,10 @@ def ppo(env_fn, actor_critic=MLPActorCritic, ac_kwargs=dict(), seed=0,
                 else:
                     v = 0
                 buf.finish_path(v)
-
                 if terminal:
                     # only save EpRet / EpLen if trajectory finished
-                    # logger.store(EpRet=ep_ret, EpLen=ep_len)
-                    logger.store(EpRet=ep_ret, EpLen=ep_len, EpCost=ep_cost)
-
-                o, ep_ret, ep_len, ep_cost = env.reset(), 0, 0, 0
+                    logger.store(EpRet=ep_ret, EpLen=ep_len)
+                o, ep_ret, ep_len = env.reset(), 0, 0
 
         # Save model
         if (epoch % save_freq == 0) or (epoch == epochs - 1):
@@ -355,15 +318,10 @@ def ppo(env_fn, actor_critic=MLPActorCritic, ac_kwargs=dict(), seed=0,
         # Perform PPO update!
         update()
 
-        #  Cumulative cost calculations
-        cumulative_cost = mpi_sum(cum_cost)
-        cost_rate = cumulative_cost / ((epoch + 1) * steps_per_epoch)
-
         # Log info about epoch
         logger.log_tabular('Epoch', epoch)
         logger.log_tabular('EpRet', with_min_and_max=True)
         logger.log_tabular('EpLen', average_only=True)
-        logger.log_tabular('EpCost', with_min_and_max=True)
         logger.log_tabular('VVals', with_min_and_max=True)
         logger.log_tabular('TotalEnvInteracts', (epoch + 1) * steps_per_epoch)
         logger.log_tabular('LossPi', average_only=True)
@@ -374,7 +332,6 @@ def ppo(env_fn, actor_critic=MLPActorCritic, ac_kwargs=dict(), seed=0,
         logger.log_tabular('KL', average_only=True)
         logger.log_tabular('ClipFrac', average_only=True)
         logger.log_tabular('StopIter', average_only=True)
-
         logger.log_tabular('Time', time.time() - start_time)
         logger.dump_tabular()
 
@@ -383,18 +340,15 @@ if __name__ == '__main__':
     import argparse
 
     parser = argparse.ArgumentParser()
-    # parser.add_argument('--env', type=str, default='HalfCheetah-v2')
-    parser.add_argument('--env', type=str, default='Safexp-PointGoal1-v0')
+    parser.add_argument('--env', type=str, default='HalfCheetah-v2')
     parser.add_argument('--hid', type=int, default=64)
     parser.add_argument('--l', type=int, default=2)
     parser.add_argument('--gamma', type=float, default=0.99)
-    parser.add_argument('--cost_gamma', type=float, default=0.99)
     parser.add_argument('--seed', '-s', type=int, default=0)
     # parser.add_argument('--cpu', type=int, default=4)
     parser.add_argument('--cpu', type=int, default=1)
     parser.add_argument('--steps', type=int, default=4000)
     parser.add_argument('--epochs', type=int, default=50)
-    parser.add_argument('--cost_lim', type=float, default=10)
     parser.add_argument('--exp_name', type=str, default='ppo')
     args = parser.parse_args()
 
@@ -405,8 +359,7 @@ if __name__ == '__main__':
 
     logger_kwargs = setup_logger_kwargs(args.exp_name, args.seed)
 
-    ppo(lambda: gym.make(args.env), actor_critic=MLPActorCritic, ac_kwargs=dict(hidden_sizes=[args.hid] * args.l),
-        gamma=args.gamma, seed=args.seed, steps_per_epoch=args.steps, epochs=args.epochs, logger_kwargs=logger_kwargs)
-
-    # ppo(lambda: gym.make('Safexp-PointGoal1-v0'), actor_critic=MLPActorCritic, ac_kwargs=dict(hidden_sizes=[args.hid] * args.l),
-    #     gamma=args.gamma, seed=args.seed, steps_per_epoch=args.steps, epochs=args.epochs, logger_kwargs=logger_kwargs)
+    ppo(lambda: gym.make(args.env), actor_critic=MLPActorCritic,
+        ac_kwargs=dict(hidden_sizes=[args.hid] * args.l), gamma=args.gamma,
+        seed=args.seed, steps_per_epoch=args.steps, epochs=args.epochs,
+        logger_kwargs=logger_kwargs)

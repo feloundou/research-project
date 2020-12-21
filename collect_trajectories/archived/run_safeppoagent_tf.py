@@ -401,9 +401,9 @@ def run_polopt_agent(env_fn,
             if agent.reward_penalized:
                 r_total = r - cur_penalty * c
                 r_total = r_total / (1 + cur_penalty)
-                buf.store(o, a, r_total, v_t, 0, 0, logp_t, pi_info_t)
+                buf.store(o, a, r_total, v_t, 0, logp_t, 0)
             else:
-                buf.store(o, a, r, v_t, c, vc_t, logp_t, pi_info_t)
+                buf.store(o, a, r, v_t, vc_t, logp_t, c)
             logger.store(VVals=v_t, CostVVals=vc_t)
 
             o = o2
@@ -425,7 +425,7 @@ def run_polopt_agent(env_fn,
                         last_cval = 0
                     else:
                         last_val, last_cval = sess.run([v, vc], feed_dict=feed_dict)
-                buf.finish_path(last_val, last_cval)
+                buf.finish_path(last_val)
 
                 # Only save EpRet / EpLen if trajectory finished
                 if terminal:

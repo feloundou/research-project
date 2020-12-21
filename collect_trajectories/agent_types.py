@@ -199,7 +199,7 @@ class PPOAgent(Agent):
             if kl > self.kl_margin * target_kl:
                 self.logger.log('Early stopping at step %d due to reaching max kl.' % i)
                 break
-        self.logger.store(StopIter=i)
+        self.logger.store(,
 
     def log(self):
         self.logger.log_tabular('StopIter', average_only=True)
@@ -249,7 +249,7 @@ class TRPOAgent(TrustRegionAgent):
         old_params = self.sess.run(get_pi_params)
 
         # Save lagrange multiplier
-        self.logger.store(Alpha=alpha)
+        self.logger.store(,
 
         def set_and_eval(step):
             self.sess.run(set_pi_params, feed_dict={v_ph: old_params - alpha * x * step})
@@ -260,12 +260,12 @@ class TRPOAgent(TrustRegionAgent):
             kl, pi_l_new = set_and_eval(step=self.backtrack_coeff ** j)
             if kl <= target_kl and pi_l_new <= pi_l_old:
                 self.logger.log('Accepting new params at step %d of line search.' % j)
-                self.logger.store(BacktrackIters=j)
+                self.logger.store(,
                 break
 
             if j == self.backtrack_iters - 1:
                 self.logger.log('Line search failed! Keeping old params.')
-                self.logger.store(BacktrackIters=j)
+                self.logger.store(,
                 kl, pi_l_new = set_and_eval(step=0.)
 
     def log(self):
@@ -385,12 +385,7 @@ class CPOAgent(TrustRegionAgent):
         x = (1. / (lam + EPS)) * (v + nu * w) if optim_case > 0 else nu * w
 
         # save intermediates for diagnostic purposes
-        self.logger.store(Optim_A=A, Optim_B=B, Optim_c=c,
-                          Optim_q=q, Optim_r=r, Optim_s=s,
-                          Optim_Lam=lam, Optim_Nu=nu,
-                          Penalty=nu, DeltaPenalty=0,
-                          Margin=self.margin,
-                          OptimCase=optim_case)
+        self.logger.store(,
 
         def set_and_eval(step):
             self.sess.run(set_pi_params, feed_dict={v_ph: old_params - step * x})
@@ -405,12 +400,12 @@ class CPOAgent(TrustRegionAgent):
                     (pi_l_new <= pi_l_old if optim_case > 1 else True) and
                     surr_cost_new - surr_cost_old <= max(-c, 0)):
                 self.logger.log('Accepting new params at step %d of line search.' % j)
-                self.logger.store(BacktrackIters=j)
+                self.logger.store(,
                 break
 
             if j == self.backtrack_iters - 1:
                 self.logger.log('Line search failed! Keeping old params.')
-                self.logger.store(BacktrackIters=j)
+                self.logger.store(,
                 kl, pi_l_new, surr_cost_new = set_and_eval(step=0.)
 
     def log(self):
