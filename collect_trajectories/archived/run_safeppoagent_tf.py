@@ -17,15 +17,6 @@ from utils import *
 from agent_types import *
 from network import *
 
-# import safe_rl.pg.trust_region as tro
-# from safe_rl.pg.agents import PPOAgent, TRPOAgent, CPOAgent
-# from safe_rl.pg.buffer import CPOBuffer
-# from safe_rl.pg.network import count_vars, get_vars, mlp_actor_critic, placeholders, placeholders_from_spaces
-# from safe_rl.pg.utils import values_as_sorted_list
-# from safe_rl.utils.logx import EpochLogger
-# from safe_rl.utils.mpi_tf import MpiAdamOptimizer, sync_all_params
-# from safe_rl.utils.mpi_tools import mpi_fork, proc_id, num_procs, mpi_sum
-
 
 # Multi-purpose agent runner for policy optimization algos
 # (PPO, TRPO, their primal-dual equivalents, CPO)
