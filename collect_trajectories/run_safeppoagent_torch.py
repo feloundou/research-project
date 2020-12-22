@@ -1,4 +1,6 @@
 import sys
+from cpprb import ReplayBuffer
+import numpy as np
 
 print(sys.path)
 
@@ -39,6 +41,20 @@ class PPOBuffer:
         self.cost_gamma, self.cost_lam = cost_gamma, cost_lam
         self.ptr, self.path_start_idx, self.max_size = 0, 0, size
 
+        #
+        # obs_shape = 60 # Tyna note to change later
+        # act_dim = 2  # Tyna note to change later
+
+        self.rb = ReplayBuffer(size,
+                          env_dict={"obs": {"shape": obs_dim},
+                                    "act": {"shape": act_dim},
+                                    "rew": {}
+                                    # "next_obs": {"shape": obs_dim},
+                                    # "done": {}
+                                    }
+
+                               )
+
     def store(self, obs, act, rew, val, cost, cval, logp):
         """
         Append one timestep of agent-environment interaction to the buffer.
@@ -52,6 +68,11 @@ class PPOBuffer:
         self.cost_buf[self.ptr] = cost
         self.cval_buf[self.ptr] = cval
         self.logp_buf[self.ptr] = logp
+
+        self.rb.add(obs=obs, act=act, rew=rew,
+                    # next_obs=next_obs,
+                    # done=done
+                    )
 
         self.ptr += 1
 
@@ -81,6 +102,12 @@ class PPOBuffer:
         self.adv_buf[path_slice] = discount_cumsum(deltas, self.gamma * self.lam)
         # computes rewards-to-go, to be targets for the value function
         self.ret_buf[path_slice] = discount_cumsum(rews, self.gamma)[:-1]
+
+        print("Reward buffer")
+        print(self.rew_buf)
+
+        print("Cost buffer")
+        print(self.cost_buf)
 
         # implement GAE-Lambda advantage for costs
         cdeltas = costs[:-1] + self.gamma * cvals[1:] - cvals[:-1]
@@ -307,6 +334,7 @@ def ppo(env_fn, actor_critic=MLPActorCritic, ac_kwargs=dict(), seed=0,
             # env.step
             next_o, r, d, info = env.step(a)
 
+
             # Include penalty on cost
             c = info.get('cost', 0)
             # print("cost")
@@ -405,8 +433,32 @@ if __name__ == '__main__':
 
     logger_kwargs = setup_logger_kwargs(args.exp_name, args.seed)
 
+    print("Print environment features")
+    newenv = gym.make(args.env)
+    print("Number of hazards: ", newenv.hazards_num)
+    print("Goal size: ", newenv.goal_size)
+    print("Goal placements", newenv.goal_placements)
+    print("Reward Goal", newenv.reward_goal)
+    print("Reward distance", newenv.reward_distance)
+    print("Constrain indicator", newenv.constrain_indicator)
+
+    # 'robot_base': 'xmls/point.xml',
+
+    # 'reward_goal': 1.0,
+    # 'reward_distance': 1.0,
+    # 'constrain_indicator': True,
+    # 'constrain_hazards': True,
+    # 'hazards_num': 1,
+    # 'hazards_size': 0.5,
+    # 'hazards_locations': [(2, 0)],
+    # 'hazards_cost': 1.0,
+    # 'robot_locations': [(0, 0)],
+    # 'robot_rot': 0,
+
+
     ppo(lambda: gym.make(args.env), actor_critic=MLPActorCritic, ac_kwargs=dict(hidden_sizes=[args.hid] * args.l),
         gamma=args.gamma, seed=args.seed, steps_per_epoch=args.steps, epochs=args.epochs, logger_kwargs=logger_kwargs)
 
     # ppo(lambda: gym.make('Safexp-PointGoal1-v0'), actor_critic=MLPActorCritic, ac_kwargs=dict(hidden_sizes=[args.hid] * args.l),
     #     gamma=args.gamma, seed=args.seed, steps_per_epoch=args.steps, epochs=args.epochs, logger_kwargs=logger_kwargs)
+
