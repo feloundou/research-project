@@ -6,14 +6,17 @@ import tensorflow as tf
 import torch
 import os.path as osp, time, atexit, os
 import warnings
+from ppo_algos import *
+from cpprb import ReplayBuffer
 # from spinup.utils.mpi_tools import proc_id, mpi_statistics_scalar
 # from spinup.utils.serialization_utils import convert_json
 
 from mpi4py import MPI
 import numpy as np
 
-import os
-import os.path as osp
+import string
+
+
 
 # Default neural network backend for each algo
 # (Must be either 'tf1' or 'pytorch')
@@ -351,45 +354,8 @@ class Logger:
                 joblib.dump(state_dict, osp.join(self.output_dir, fname))
             except:
                 self.log('Warning: could not pickle state_dict.', color='red')
-            if hasattr(self, 'tf_saver_elements'):
-                self._tf_simple_save(itr)
-            if hasattr(self, 'pytorch_saver_elements'):
-                self._pytorch_simple_save(itr)
-
-    def setup_tf_saver(self, sess, inputs, outputs):
-        """
-        Set up easy model saving for tensorflow.
-        Call once, after defining your computation graph but before training.
-        Args:
-            sess: The Tensorflow session in which you train your computation
-                graph.
-            inputs (dict): A dictionary that maps from keys of your choice
-                to the tensorflow placeholders that serve as inputs to the
-                computation graph. Make sure that *all* of the placeholders
-                needed for your outputs are included!
-            outputs (dict): A dictionary that maps from keys of your choice
-                to the outputs from your computation graph.
-        """
-        self.tf_saver_elements = dict(session=sess, inputs=inputs, outputs=outputs)
-        self.tf_saver_info = {'inputs': {k: v.name for k, v in inputs.items()},
-                              'outputs': {k: v.name for k, v in outputs.items()}}
-
-    def _tf_simple_save(self, itr=None):
-        """
-        Uses simple_save to save a trained model, plus info to make it easy
-        to associated tensors to variables after restore.
-        """
-        if proc_id() == 0:
-            assert hasattr(self, 'tf_saver_elements'), \
-                "First have to setup saving with self.setup_tf_saver"
-            fpath = 'tf1_save' + ('%d' % itr if itr is not None else '')
-            fpath = osp.join(self.output_dir, fpath)
-            if osp.exists(fpath):
-                # simple_save refuses to be useful if fpath already exists,
-                # so just delete fpath if it's there.
-                shutil.rmtree(fpath)
-            tf.saved_model.simple_save(export_dir=fpath, **self.tf_saver_elements)
-            joblib.dump(self.tf_saver_info, osp.join(fpath, 'model_info.pkl'))
+            # if hasattr(self, 'pytorch_saver_elements'):
+            self._pytorch_simple_save(itr)
 
     def setup_pytorch_saver(self, what_to_save):
         """
@@ -510,6 +476,7 @@ class EpochLogger(Logger):
             v = self.epoch_dict[key]
             vals = np.concatenate(v) if isinstance(v[0], np.ndarray) and len(v[0].shape) > 0 else v
             stats = mpi_statistics_scalar(vals, with_min_and_max=with_min_and_max)
+
             super().log_tabular(key if average_only else 'Average' + key, stats[0])
             if not (average_only):
                 super().log_tabular('Std' + key, stats[1])
@@ -759,11 +726,10 @@ class ExperimentGrid:
         print('=' * DIV_LINE_WIDTH)
 
     def _default_shorthand(self, key):
-        # Create a default shorthand for the key, built from the first
-        # three letters of each colon-separated part.
-        # But if the first three letters contains something which isn't
-        # alphanumeric, shear that off.
+        # Create a default shorthand for the key, built from the first 3 letters of each colon-separated part.
+        # But if the first three letters contains something which isn't alphanumeric, shear that off.
         valid_chars = "%s%s" % (string.ascii_letters, string.digits)
+        # valid_chars = "%s%s" % (key.ascii_letters, key.digits)
 
         def shear(x):
             return ''.join(z for z in x[:3] if z in valid_chars)
@@ -992,6 +958,134 @@ class ExperimentGrid:
 
             call_experiment(exp_name, thunk_, num_cpu=num_cpu,
                             data_dir=data_dir, datestamp=datestamp, **var)
+
+
+class PPOBuffer:
+    """
+    A buffer for storing trajectories experienced by a PPO agent interacting
+    with the environment, and using Generalized Advantage Estimation (GAE-Lambda)
+    for calculating the advantages of state-action pairs.
+
+    Generalized Advantage Estimation:
+    Forks the different runs across cores, message passes using mpi_fork,
+    calculates the average of advantage, then descends.
+    """
+
+    def __init__(self, obs_dim, act_dim, size, gamma=0.99, lam=0.95, cost_gamma=0.99, cost_lam=0.95):
+        self.obs_buf = np.zeros(combined_shape(size, obs_dim), dtype=np.float32)
+        self.act_buf = np.zeros(combined_shape(size, act_dim), dtype=np.float32)
+        self.adv_buf = np.zeros(size, dtype=np.float32)
+        self.rew_buf = np.zeros(size, dtype=np.float32)
+        self.ret_buf = np.zeros(size, dtype=np.float32)
+        self.val_buf = np.zeros(size, dtype=np.float32)
+        self.logp_buf = np.zeros(size, dtype=np.float32)
+
+        self.cadv_buf = np.zeros(size, dtype=np.float32)    # cost advantage
+        self.cost_buf = np.zeros(size, dtype=np.float32)    # costs
+        self.cret_buf = np.zeros(size, dtype=np.float32)    # cost return
+        self.cval_buf = np.zeros(size, dtype=np.float32)    # cost value
+
+        self.gamma, self.lam = gamma, lam
+        self.cost_gamma, self.cost_lam = cost_gamma, cost_lam
+        self.ptr, self.path_start_idx, self.max_size = 0, 0, size
+
+
+        self.rb = ReplayBuffer(size,
+                          env_dict={"obs": {"shape": obs_dim},
+                                    "act": {"shape": act_dim},
+                                    "rew": {},
+                                    "next_obs": {"shape": obs_dim},
+                                    "done": {}
+                                    }
+                               )
+
+    def store(self, obs, act, rew, val, cost, cval, logp, done, next_obs):
+        """
+        Append one timestep of agent-environment interaction to the buffer.
+        """
+        assert self.ptr < self.max_size  # buffer has to have room so you can store
+        self.obs_buf[self.ptr] = obs
+        self.act_buf[self.ptr] = act
+        self.rew_buf[self.ptr] = rew
+        self.val_buf[self.ptr] = val
+
+        self.cost_buf[self.ptr] = cost
+        self.cval_buf[self.ptr] = cval
+        self.logp_buf[self.ptr] = logp
+
+        self.rb.add(obs=obs, act=act, rew=rew, next_obs=next_obs, done=done)
+
+        self.ptr += 1
+
+    def finish_path(self, last_val=0, last_cval=0):
+        """
+        Call this at the end of a trajectory, or when one gets cut off
+        by an epoch ending. This looks back in the buffer to where the
+        trajectory started, and uses rewards and value estimates from
+        the whole trajectory to compute advantage estimates with GAE-Lambda,
+        as well as compute the rewards-to-go for each state, to use as
+        the targets for the value function.
+        The "last_val" argument should be 0 if the trajectory ended
+        because the agent reached a terminal state (died), and otherwise
+        should be V(s_T), the value function estimated for the last state.
+        This allows us to bootstrap the reward-to-go calculation to account
+        for timesteps beyond the arbitrary episode horizon (or epoch cutoff).
+        :param last_cval:
+        """
+        path_slice = slice(self.path_start_idx, self.ptr)
+        # print("Path slice")
+        # print(path_slice)
+        rews = np.append(self.rew_buf[path_slice], last_val)
+        vals = np.append(self.val_buf[path_slice], last_val)
+        costs = np.append(self.cost_buf[path_slice], last_cval)
+        cvals = np.append(self.cval_buf[path_slice], last_cval)
+
+        # implement GAE-Lambda advantage calculation
+        deltas = rews[:-1] + self.gamma * vals[1:] - vals[:-1]
+        # print("Advantage buffer")
+        self.adv_buf[path_slice] = discount_cumsum(deltas, self.gamma * self.lam)
+        # print(self.adv_buf)
+        # computes rewards-to-go, to be targets for the value function
+        self.ret_buf[path_slice] = discount_cumsum(rews, self.gamma)[:-1]
+
+        # print("Reward buffer")
+        # print(self.rew_buf)
+        # print("Cost buffer")
+        # print(self.cost_buf)
+
+        # implement GAE-Lambda advantage for costs
+        cdeltas = costs[:-1] + self.gamma * cvals[1:] - cvals[:-1]
+        self.cadv_buf[path_slice] = discount_cumsum(cdeltas, self.cost_gamma * self.cost_lam)
+        # computes rewards-to-go
+        self.cret_buf[path_slice] = discount_cumsum(costs, self.cost_gamma)[:-1]
+
+        self.path_start_idx = self.ptr
+
+    def get(self):
+        """
+        Call this at the end of an epoch to get all of the data from
+        the buffer, with advantages appropriately normalized (shifted to have
+        mean zero and std one). Also, resets some pointers in the buffer.
+        """
+        assert self.ptr == self.max_size  # buffer has to be full before you can get
+        self.ptr, self.path_start_idx = 0, 0
+        # the next four lines implement the advantage normalization trick, for rewards and costs
+        adv_mean, adv_std = mpi_statistics_scalar(self.adv_buf)
+        self.adv_buf = (self.adv_buf - adv_mean) / adv_std
+
+        cadv_mean, _ = mpi_statistics_scalar(self.cadv_buf)
+        # Center, but do NOT rescale advantages for cost gradient # Tyna Note
+        self.cadv_buf -= cadv_mean
+        # print("final get cost advantage")
+        # print(self.cadv_buf)
+
+        data = dict(obs=self.obs_buf, act=self.act_buf, ret=self.ret_buf,
+                    adv=self.adv_buf, logp=self.logp_buf, cadv=self.cadv_buf,
+                    cret=self.cret_buf)
+
+
+        return {k: torch.as_tensor(v, dtype=torch.float32) for k, v in data.items()}
+
 
 
 def test_eg():

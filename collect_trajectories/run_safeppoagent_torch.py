@@ -10,139 +10,47 @@ import safety_gym
 from safety_gym.envs.engine import Engine
 
 from spinup_utils import *
-from archived.ppo_algos import *
+from ppo_algos import *
 
-class PPOBuffer:
-    """
-    A buffer for storing trajectories experienced by a PPO agent interacting
-    with the environment, and using Generalized Advantage Estimation (GAE-Lambda)
-    for calculating the advantages of state-action pairs.
+import wandb
+wandb.login()
 
-    Generalized Advantage Estimation:
-    Forks the different runs across cores, message passes using mpi_fork,
-    calculates the average of advantage, then descends.
-    """
+wandb.init(name = "secondrun", project="safe-ppo-agent")
 
-    def __init__(self, obs_dim, act_dim, size, gamma=0.99, lam=0.95, cost_gamma=0.99, cost_lam=0.95):
-        self.obs_buf = np.zeros(combined_shape(size, obs_dim), dtype=np.float32)
-        self.act_buf = np.zeros(combined_shape(size, act_dim), dtype=np.float32)
-        self.adv_buf = np.zeros(size, dtype=np.float32)
-        self.rew_buf = np.zeros(size, dtype=np.float32)
-        self.ret_buf = np.zeros(size, dtype=np.float32)
-        self.val_buf = np.zeros(size, dtype=np.float32)
-        self.logp_buf = np.zeros(size, dtype=np.float32)
+# Define PPO functions
 
-        self.cadv_buf = np.zeros(size, dtype=np.float32)    # cost advantage
-        self.cost_buf = np.zeros(size, dtype=np.float32)    # costs
-        self.cret_buf = np.zeros(size, dtype=np.float32)    # cost return
-        self.cval_buf = np.zeros(size, dtype=np.float32)    # cost value
+def ppo(env_fn,
+        actor_critic=MLPActorCritic,
+        ac_kwargs=dict(),
+        seed=0,
+        # Experience Collection
+        steps_per_epoch=4000,
+        epochs=50,
+        max_ep_len=1000,
+        # Discount factors:
+        gamma=0.99,
+        lam=0.97,
+        cost_gamma = 0.99,
+        cost_lam=0.97,
+        # Policy Learning:
+        ent_reg=0.,
+        # Cost constraints / penalties:
+        cost_lim=25,
+        penalty_init=1.,
+        penalty_lr=5e-2,
+        # KL divergence:
+        target_kl = 0.01,
+        # Value learning:
+        vf_lr=1e-3,
+        train_v_iters=80,
+        # Policy Learning:
+        pi_lr=3e-4,
+        train_pi_iters=80,
+        # Clipping
+        clip_ratio=0.2,
+        logger_kwargs=dict(),
+        save_freq=10):
 
-        self.gamma, self.lam = gamma, lam
-        self.cost_gamma, self.cost_lam = cost_gamma, cost_lam
-        self.ptr, self.path_start_idx, self.max_size = 0, 0, size
-
-        #
-        # obs_shape = 60 # Tyna note to change later
-        # act_dim = 2  # Tyna note to change later
-
-        self.rb = ReplayBuffer(size,
-                          env_dict={"obs": {"shape": obs_dim},
-                                    "act": {"shape": act_dim},
-                                    "rew": {}
-                                    # "next_obs": {"shape": obs_dim},
-                                    # "done": {}
-                                    }
-
-                               )
-
-    def store(self, obs, act, rew, val, cost, cval, logp):
-        """
-        Append one timestep of agent-environment interaction to the buffer.
-        """
-        assert self.ptr < self.max_size  # buffer has to have room so you can store
-        self.obs_buf[self.ptr] = obs
-        self.act_buf[self.ptr] = act
-        self.rew_buf[self.ptr] = rew
-        self.val_buf[self.ptr] = val
-
-        self.cost_buf[self.ptr] = cost
-        self.cval_buf[self.ptr] = cval
-        self.logp_buf[self.ptr] = logp
-
-        self.rb.add(obs=obs, act=act, rew=rew,
-                    # next_obs=next_obs,
-                    # done=done
-                    )
-
-        self.ptr += 1
-
-    def finish_path(self, last_val=0, last_cval=0):
-        """
-        Call this at the end of a trajectory, or when one gets cut off
-        by an epoch ending. This looks back in the buffer to where the
-        trajectory started, and uses rewards and value estimates from
-        the whole trajectory to compute advantage estimates with GAE-Lambda,
-        as well as compute the rewards-to-go for each state, to use as
-        the targets for the value function.
-        The "last_val" argument should be 0 if the trajectory ended
-        because the agent reached a terminal state (died), and otherwise
-        should be V(s_T), the value function estimated for the last state.
-        This allows us to bootstrap the reward-to-go calculation to account
-        for timesteps beyond the arbitrary episode horizon (or epoch cutoff).
-        :param last_cval:
-        """
-        path_slice = slice(self.path_start_idx, self.ptr)
-        rews = np.append(self.rew_buf[path_slice], last_val)
-        vals = np.append(self.val_buf[path_slice], last_val)
-        costs = np.append(self.cost_buf[path_slice], last_cval)
-        cvals = np.append(self.cval_buf[path_slice], last_cval)
-
-        # implement GAE-Lambda advantage calculation
-        deltas = rews[:-1] + self.gamma * vals[1:] - vals[:-1]
-        self.adv_buf[path_slice] = discount_cumsum(deltas, self.gamma * self.lam)
-        # computes rewards-to-go, to be targets for the value function
-        self.ret_buf[path_slice] = discount_cumsum(rews, self.gamma)[:-1]
-
-        print("Reward buffer")
-        print(self.rew_buf)
-
-        print("Cost buffer")
-        print(self.cost_buf)
-
-        # implement GAE-Lambda advantage for costs
-        cdeltas = costs[:-1] + self.gamma * cvals[1:] - cvals[:-1]
-        self.cadv_buf[path_slice] = discount_cumsum(cdeltas, self.cost_gamma * self.cost_lam)
-        # computes rewards-to-go
-        self.cret_buf[path_slice] = discount_cumsum(costs, self.cost_gamma)[:-1]
-
-        self.path_start_idx = self.ptr
-
-    def get(self):
-        """
-        Call this at the end of an epoch to get all of the data from
-        the buffer, with advantages appropriately normalized (shifted to have
-        mean zero and std one). Also, resets some pointers in the buffer.
-        """
-        assert self.ptr == self.max_size  # buffer has to be full before you can get
-        self.ptr, self.path_start_idx = 0, 0
-        # the next four lines implement the advantage normalization trick, for rewards and costs
-        adv_mean, adv_std = mpi_statistics_scalar(self.adv_buf)
-        self.adv_buf = (self.adv_buf - adv_mean) / adv_std
-
-        cadv_mean, _ = mpi_statistics_scalar(self.cadv_buf)
-        # Center, but do NOT rescale advantages for cost gradient # Tyna Note
-        self.cadv_buf -= cadv_mean
-
-        data = dict(obs=self.obs_buf, act=self.act_buf, ret=self.ret_buf,
-                    adv=self.adv_buf, logp=self.logp_buf, cadv=self.cadv_buf,
-                    cret=self.cret_buf)
-        return {k: torch.as_tensor(v, dtype=torch.float32) for k, v in data.items()}
-
-
-def ppo(env_fn, actor_critic=MLPActorCritic, ac_kwargs=dict(), seed=0,
-        steps_per_epoch=4000, epochs=50, gamma=0.99, clip_ratio=0.2, pi_lr=3e-4,
-        vf_lr=1e-3, train_pi_iters=80, train_v_iters=80, lam=0.97, max_ep_len=1000,
-        target_kl=0.01, logger_kwargs=dict(), save_freq=10):
     """
     Proximal Policy Optimization (by clipping),
     with early stopping based on approximate KL
@@ -293,9 +201,9 @@ def ppo(env_fn, actor_critic=MLPActorCritic, ac_kwargs=dict(), seed=0,
             pi_optimizer.zero_grad()
             loss_pi, pi_info = compute_loss_pi(data)
             kl = mpi_avg(pi_info['kl'])
-            if kl > 1.5 * target_kl:
-                logger.log('Early stopping at step %d due to reaching max kl.' % i)
-                break
+            # if kl > 1.5 * target_kl:
+            #     logger.log('Early stopping at step %d due to reaching max kl.' % i)
+            #     break
             loss_pi.backward()
             mpi_avg_grads(ac.pi)  # average grads across MPI processes
             pi_optimizer.step()
@@ -317,6 +225,13 @@ def ppo(env_fn, actor_critic=MLPActorCritic, ac_kwargs=dict(), seed=0,
                      DeltaLossPi=(loss_pi.item() - pi_l_old),
                      DeltaLossV=(loss_v.item() - v_l_old))
 
+        update_metrics = {'loss v': v_l_old,
+                       'loss pi': pi_l_old,
+                       'KL': kl
+                       }
+
+        wandb.log(update_metrics)
+
     # Prepare for interaction with environment
     start_time = time.time()
     # o, ep_ret, ep_len = env.reset(), 0, 0
@@ -334,7 +249,6 @@ def ppo(env_fn, actor_critic=MLPActorCritic, ac_kwargs=dict(), seed=0,
             # env.step
             next_o, r, d, info = env.step(a)
 
-
             # Include penalty on cost
             c = info.get('cost', 0)
             # print("cost")
@@ -349,7 +263,7 @@ def ppo(env_fn, actor_critic=MLPActorCritic, ac_kwargs=dict(), seed=0,
 
             # save and log
             # buf.store(o, a, r, v, logp)
-            buf.store(o, a, r, v, c, vc, logp)
+            buf.store(o, a, r, v, c, vc, logp, d, next_o)
             logger.store(VVals=v)
 
             # Update obs (critical!)
@@ -376,7 +290,7 @@ def ppo(env_fn, actor_critic=MLPActorCritic, ac_kwargs=dict(), seed=0,
 
                 o, ep_ret, ep_len, ep_cost = env.reset(), 0, 0, 0
 
-        # Save model
+        # Save model and save last trajectory
         if (epoch % save_freq == 0) or (epoch == epochs - 1):
             logger.save_state({'env': env}, None)
 
@@ -386,6 +300,15 @@ def ppo(env_fn, actor_critic=MLPActorCritic, ac_kwargs=dict(), seed=0,
         #  Cumulative cost calculations
         cumulative_cost = mpi_sum(cum_cost)
         cost_rate = cumulative_cost / ((epoch + 1) * steps_per_epoch)
+
+        log_metrics = {'epoch': epoch,
+                       'value': v,
+                       'cost rate': cost_rate,
+                       'cumulative cost': cumulative_cost,
+                        }
+
+        wandb.log(log_metrics)
+
 
         # Log info about epoch
         logger.log_tabular('Epoch', epoch)
@@ -402,7 +325,6 @@ def ppo(env_fn, actor_critic=MLPActorCritic, ac_kwargs=dict(), seed=0,
         logger.log_tabular('KL', average_only=True)
         logger.log_tabular('ClipFrac', average_only=True)
         logger.log_tabular('StopIter', average_only=True)
-
         logger.log_tabular('Time', time.time() - start_time)
         logger.dump_tabular()
 
@@ -410,8 +332,10 @@ def ppo(env_fn, actor_critic=MLPActorCritic, ac_kwargs=dict(), seed=0,
 if __name__ == '__main__':
     import argparse
 
+    print("Testing experimental grid")
+    print(test_eg())
+
     parser = argparse.ArgumentParser()
-    # parser.add_argument('--env', type=str, default='HalfCheetah-v2')
     parser.add_argument('--env', type=str, default='Safexp-PointGoal1-v0')
     parser.add_argument('--hid', type=int, default=64)
     parser.add_argument('--l', type=int, default=2)
@@ -423,7 +347,7 @@ if __name__ == '__main__':
     parser.add_argument('--steps', type=int, default=4000)
     parser.add_argument('--epochs', type=int, default=50)
     parser.add_argument('--cost_lim', type=float, default=10)
-    parser.add_argument('--exp_name', type=str, default='ppo')
+    parser.add_argument('--exp_name', type=str, default='ppo_safe_50ep')
     args = parser.parse_args()
 
     mpi_fork(args.cpu)  # run parallel code with mpi
@@ -436,29 +360,31 @@ if __name__ == '__main__':
     print("Print environment features")
     newenv = gym.make(args.env)
     print("Number of hazards: ", newenv.hazards_num)
+    print("Hazard sizes: ", newenv.hazards_size)
+    print("Hazard locations: ", newenv.hazards_locations)
+    print("Hazards cost: ", newenv.hazards_cost)
     print("Goal size: ", newenv.goal_size)
-    print("Goal placements", newenv.goal_placements)
-    print("Reward Goal", newenv.reward_goal)
-    print("Reward distance", newenv.reward_distance)
-    print("Constrain indicator", newenv.constrain_indicator)
+    print("Goal placements: ", newenv.goal_placements)
+    print("Reward Goal: ", newenv.reward_goal)
+    print("Reward distance: ", newenv.reward_distance)
+    print("Constrain indicator: ", newenv.constrain_indicator)
+    print("Constrain hazards: ", newenv.constrain_hazards)
 
     # 'robot_base': 'xmls/point.xml',
-
-    # 'reward_goal': 1.0,
-    # 'reward_distance': 1.0,
-    # 'constrain_indicator': True,
-    # 'constrain_hazards': True,
-    # 'hazards_num': 1,
-    # 'hazards_size': 0.5,
-    # 'hazards_locations': [(2, 0)],
-    # 'hazards_cost': 1.0,
     # 'robot_locations': [(0, 0)],
     # 'robot_rot': 0,
 
+# Run experiment
+    ppo(lambda: gym.make(args.env),
+        actor_critic=MLPActorCritic,
+        ac_kwargs=dict(hidden_sizes=[args.hid] * args.l),
+        gamma=args.gamma, seed=args.seed,
+        steps_per_epoch=args.steps,
+        epochs=args.epochs,
+        logger_kwargs=logger_kwargs)
 
-    ppo(lambda: gym.make(args.env), actor_critic=MLPActorCritic, ac_kwargs=dict(hidden_sizes=[args.hid] * args.l),
-        gamma=args.gamma, seed=args.seed, steps_per_epoch=args.steps, epochs=args.epochs, logger_kwargs=logger_kwargs)
+wandb.config.update(args)
 
-    # ppo(lambda: gym.make('Safexp-PointGoal1-v0'), actor_critic=MLPActorCritic, ac_kwargs=dict(hidden_sizes=[args.hid] * args.l),
-    #     gamma=args.gamma, seed=args.seed, steps_per_epoch=args.steps, epochs=args.epochs, logger_kwargs=logger_kwargs)
+wandb.finish()
 
+# reward function: r - penalty*cost

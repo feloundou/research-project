@@ -1,11 +1,22 @@
-### !bin/bash
-# os.system()
-
-# import tensorflow.compat.v1 as tf
-# tf.disable_v2_behavior()
 import gym
+
+from spinup_utils import *
+from archived.ppo_algos import *
 from agent_types import *
 from archived.network import *
+
+# import safe_rl.pg.trust_region as tro
+# from safe_rl.pg.agents import PPOAgent, TRPOAgent, CPOAgent
+# from safe_rl.pg.buffer import CPOBuffer
+# from safe_rl.pg.network import count_vars, \
+#     get_vars, \
+#     mlp_actor_critic, \
+#     placeholders, \
+#     placeholders_from_spaces
+# from safe_rl.pg.utils import values_as_sorted_list
+# from safe_rl.utils.logx import EpochLogger
+# from safe_rl.utils.mpi_tf import MpiAdamOptimizer, sync_all_params
+# from safe_rl.utils.mpi_tools import mpi_fork, proc_id, num_procs, mpi_sum
 
 
 # Multi-purpose agent runner for policy optimization algos
@@ -44,40 +55,12 @@ def run_polopt_agent(env_fn,
     # =========================================================================#
     #  Prepare logger, seed, and environment in this process                  #
     # =========================================================================#
-    """
-
-    :param env_fn: Environment function
-    :param agent:
-    :param actor_critic:
-    :param ac_kwargs:
-    :param seed:
-    :param render:
-    :param steps_per_epoch:
-    :param epochs:
-    :param max_ep_len:
-    :param gamma:
-    :param lam:
-    :param cost_gamma:
-    :param cost_lam:
-    :param ent_reg:
-    :param cost_lim:
-    :param penalty_init:
-    :param penalty_lr:
-    :param target_kl:
-    :param vf_lr:
-    :param vf_iters:
-    :param logger:
-    :param logger_kwargs:
-    :param save_freq:
-    :return:
-    """
 
     logger = EpochLogger(**logger_kwargs) if logger is None else logger
     logger.save_config(locals())
 
     seed += 10000 * proc_id()
     # tf.set_random_seed(seed)
-    tf.random.set_seed(seed)
     np.random.seed(seed)
 
     env = env_fn()
@@ -98,12 +81,8 @@ def run_polopt_agent(env_fn,
     adv_ph, cadv_ph, ret_ph, cret_ph, logp_old_ph = placeholders(*(None for _ in range(5)))
 
     # Inputs to computation graph for special purposes
-    # surr_cost_rescale_ph = tf.placeholder(tf.float32, shape=())
-    # cur_cost_ph = tf.placeholder(tf.float32, shape=())
-
-    surr_cost_rescale_ph = tf.compat.v1.placeholder(tf.float32, shape=())
-    cur_cost_ph = tf.compat.v1.placeholder(tf.float32, shape=())
-
+    surr_cost_rescale_ph = tf.placeholder(tf.float32, shape=())
+    cur_cost_ph = tf.placeholder(tf.float32, shape=())
 
     # Outputs from actor critic
     ac_outs = actor_critic(x_ph, a_ph, **ac_kwargs)
@@ -156,8 +135,7 @@ def run_polopt_agent(env_fn,
     # =========================================================================#
 
     if agent.use_penalty:
-        # with tf.variable_scope('penalty'):
-        with tf.compat.v1.variable_scope('penalty'):
+        with tf.variable_scope('penalty'):
             # param_init = np.log(penalty_init)
             param_init = np.log(max(np.exp(penalty_init) - 1, 1e-8))
             penalty_param = tf.get_variable('penalty_param',
@@ -391,9 +369,9 @@ def run_polopt_agent(env_fn,
             if agent.reward_penalized:
                 r_total = r - cur_penalty * c
                 r_total = r_total / (1 + cur_penalty)
-                buf.store(o, a, r_total, v_t, 0, logp_t, 0)
+                buf.store(o, a, r_total, v_t, 0, 0, logp_t, pi_info_t)
             else:
-                buf.store(o, a, r, v_t, vc_t, logp_t, c)
+                buf.store(o, a, r, v_t, c, vc_t, logp_t, pi_info_t)
             logger.store(VVals=v_t, CostVVals=vc_t)
 
             o = o2
@@ -415,7 +393,7 @@ def run_polopt_agent(env_fn,
                         last_cval = 0
                     else:
                         last_val, last_cval = sess.run([v, vc], feed_dict=feed_dict)
-                buf.finish_path(last_val)
+                buf.finish_path(last_val, last_cval)
 
                 # Only save EpRet / EpLen if trajectory finished
                 if terminal:
@@ -533,7 +511,8 @@ if __name__ == '__main__':
 
     # Prepare logger
     # from safe_rl.utils.run_utils import setup_logger_kwargs
-    from utils import *
+    from spinup_utils import setup_logger_kwargs
+
     logger_kwargs = setup_logger_kwargs(args.exp_name, args.seed)
 
     # Prepare agent

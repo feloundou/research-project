@@ -41,18 +41,14 @@ class PPOBuffer:
         self.cost_gamma, self.cost_lam = cost_gamma, cost_lam
         self.ptr, self.path_start_idx, self.max_size = 0, 0, size
 
-        #
-        # obs_shape = 60 # Tyna note to change later
-        # act_dim = 2  # Tyna note to change later
 
         self.rb = ReplayBuffer(size,
                           env_dict={"obs": {"shape": obs_dim},
                                     "act": {"shape": act_dim},
-                                    "rew": {}
+                                    "rew": {},
                                     # "next_obs": {"shape": obs_dim},
-                                    # "done": {}
+                                    "done": {}
                                     }
-
                                )
 
     def store(self, obs, act, rew, val, cost, cval, logp):
@@ -409,7 +405,6 @@ def ppo(env_fn, actor_critic=MLPActorCritic, ac_kwargs=dict(), seed=0,
 
 if __name__ == '__main__':
     import argparse
-
     parser = argparse.ArgumentParser()
     # parser.add_argument('--env', type=str, default='HalfCheetah-v2')
     parser.add_argument('--env', type=str, default='Safexp-PointGoal1-v0')
@@ -433,14 +428,10 @@ if __name__ == '__main__':
 
     logger_kwargs = setup_logger_kwargs(args.exp_name, args.seed)
 
-    ppo(lambda: gym.make(args.env), actor_critic=MLPActorCritic, ac_kwargs=dict(hidden_sizes=[args.hid] * args.l),
-        gamma=args.gamma, seed=args.seed, steps_per_epoch=args.steps, epochs=args.epochs, logger_kwargs=logger_kwargs)
-
-    # ppo(lambda: gym.make('Safexp-PointGoal1-v0'), actor_critic=MLPActorCritic, ac_kwargs=dict(hidden_sizes=[args.hid] * args.l),
-    #     gamma=args.gamma, seed=args.seed, steps_per_epoch=args.steps, epochs=args.epochs, logger_kwargs=logger_kwargs)
-
-
 
     # Work with no-cost environmet
-    env = Engine({'hazards_num': 3})
-    env.reset()
+    # env = Engine({'hazards_cost': 0})
+    # env.reset()
+
+    ppo(lambda: gym.make(args.env), actor_critic=MLPActorCritic, ac_kwargs=dict(hidden_sizes=[args.hid] * args.l),
+        gamma=args.gamma, seed=args.seed, steps_per_epoch=args.steps, epochs=args.epochs, logger_kwargs=logger_kwargs)
