@@ -5,22 +5,29 @@ import numpy as np
 print(sys.path)
 
 from torch.optim import Adam
+from adabelief_pytorch import AdaBelief
+
 import gym
 import safety_gym
 from safety_gym.envs.engine import Engine
 
 from spinup_utils import *
 from ppo_algos import *
+from agent_types import *
 
 import wandb
 wandb.login()
 
-wandb.init(name = "secondrun", project="safe-ppo-agent")
+wandb.init(name = "saferun", project="safe-ppo-agent")
+
+
+
 
 # Define PPO functions
 
 def ppo(env_fn,
         actor_critic=MLPActorCritic,
+        agent=PPOAgent(),
         ac_kwargs=dict(),
         seed=0,
         # Experience Collection
@@ -154,12 +161,21 @@ def ppo(env_fn,
     var_counts = tuple(count_vars(module) for module in [ac.pi, ac.v])
     logger.log('\nNumber of parameters: \t pi: %d, \t v: %d\n' % var_counts)
 
+    print("Agent parameters")
+    print("Learn penalty:", agent.learn_penalty)
+    print("Use penalty:", agent.use_penalty)
+    print("Objective penalized:", agent.objective_penalized)
+    print("Reward penalized:", agent.reward_penalized)
+
+
     # Set up experience buffer
     local_steps_per_epoch = int(steps_per_epoch / num_procs())
-    buf = PPOBuffer(obs_dim, act_dim, local_steps_per_epoch, gamma, lam)
+    # buf = PPOBuffer(obs_dim, act_dim, local_steps_per_epoch, gamma, lam)
+    buf = CostPOBuffer(obs_dim, act_dim, local_steps_per_epoch, gamma, lam)
 
     # Set up function for computing PPO policy loss
     def compute_loss_pi(data):
+
         obs, act, adv, logp_old = data['obs'], data['act'], data['adv'], data['logp']
 
         # Policy loss
@@ -177,24 +193,51 @@ def ppo(env_fn,
 
         return loss_pi, pi_info
 
-    # Set up function for computing value loss
+    # Set up functions for computing value loss(es)
     def compute_loss_v(data):
-        obs, ret = data['obs'], data['ret']
-        return ((ac.v(obs) - ret) ** 2).mean()
+        obs, ret, cret = data['obs'], data['ret'], data['cret']
+        v_loss = ((ac.v(obs) - ret)**2).mean()
+        return v_loss
+
+    def compute_loss_vc(data):
+        obs, ret, cret = data['obs'], data['ret'], data['cret']
+        vc_loss = ((ac.v(obs) - cret) ** 2).mean()
+        return vc_loss
 
     # Set up optimizers for policy and value function
     pi_optimizer = Adam(ac.pi.parameters(), lr=pi_lr)
+    # print("value parameters:", ac.v.parameters())
     vf_optimizer = Adam(ac.v.parameters(), lr=vf_lr)
 
     # Set up model saving
     logger.setup_pytorch_saver(ac)
 
     def update():
+        print("Starting update")
+
+        cur_cost = logger.get_stats('EpCost')[0]
+        c = cur_cost - cost_lim
+
+        if c > 0 and agent.cares_about_cost:
+            logger.log('Warning! Safety constraint is already violated.', 'red')
+
+        print("current cost: ", cur_cost)
+        print("cost-limit: ", c)
+
         data = buf.get()
 
         pi_l_old, pi_info_old = compute_loss_pi(data)
         pi_l_old = pi_l_old.item()
-        v_l_old = compute_loss_v(data).item()
+        v_l_old= compute_loss_v(data).item()
+        vc_l_old = compute_loss_vc(data).item()
+
+        if agent.reward_penalized:
+            total_value_loss = v_l_old
+        else:
+            total_value_loss = v_l_old + vc_l_old
+
+        print("loss v_old: ", v_l_old)
+        print("constrained loss vc_old: ", vc_l_old)
 
         # Train policy with multiple steps of gradient descent
         for i in range(train_pi_iters):
@@ -226,8 +269,9 @@ def ppo(env_fn,
                      DeltaLossV=(loss_v.item() - v_l_old))
 
         update_metrics = {'loss v': v_l_old,
-                       'loss pi': pi_l_old,
-                       'KL': kl
+                          'loss vc': vc_l_old,
+                          'loss pi': pi_l_old,
+                          'KL': kl
                        }
 
         wandb.log(update_metrics)
@@ -242,17 +286,17 @@ def ppo(env_fn,
     # Main loop: collect experience in env and update/log each epoch
     for epoch in range(epochs):
         for t in range(local_steps_per_epoch):
-            a, v, logp = ac.step(torch.as_tensor(o, dtype=torch.float32))
+            a, v, vc, logp = ac.step(torch.as_tensor(o, dtype=torch.float32))
 
-            vc = v # placeholder Tyna Note
+            # vc = v # placeholder Tyna Note
 
             # env.step
             next_o, r, d, info = env.step(a)
 
             # Include penalty on cost
             c = info.get('cost', 0)
-            # print("cost")
-            # print(c)
+            # print("cost from info: ", c)
+            # print("all info: ", info)
 
             # Track cumulative cost over training
             cum_cost += c
@@ -261,9 +305,18 @@ def ppo(env_fn,
             ep_len += 1
             ep_cost += c
 
+            if agent.reward_penalized:
+                r_total = r - cur_penalty * c
+                r_total = r_total / (1 + cur_penalty)
+                # buf.store(o, a, r_total, v_t, 0, 0, logp_t, pi_info_t)
+                buf.store(o, a, r_total, v, 0, 0, logp, info)
+            else:
+                buf.store(o, a, r,       v, c, vc, logp, info)
+
             # save and log
             # buf.store(o, a, r, v, logp)
-            buf.store(o, a, r, v, c, vc, logp, d, next_o)
+            # buf.store(o, a, r, v, c, vc, logp, d, next_o)
+            # buf.store(o, a, r, v, c, vc, logp, next_o)
             logger.store(VVals=v)
 
             # Update obs (critical!)
@@ -278,7 +331,7 @@ def ppo(env_fn,
                     print('Warning: trajectory cut off by epoch at %d steps.' % ep_len, flush=True)
                 # if trajectory didn't reach terminal state, bootstrap value target
                 if timeout or epoch_ended:
-                    _, v, _ = ac.step(torch.as_tensor(o, dtype=torch.float32))
+                    _, v, _, _ = ac.step(torch.as_tensor(o, dtype=torch.float32))
                 else:
                     v = 0
                 buf.finish_path(v)
@@ -308,7 +361,6 @@ def ppo(env_fn,
                         }
 
         wandb.log(log_metrics)
-
 
         # Log info about epoch
         logger.log_tabular('Epoch', epoch)
@@ -347,6 +399,10 @@ if __name__ == '__main__':
     parser.add_argument('--steps', type=int, default=4000)
     parser.add_argument('--epochs', type=int, default=50)
     parser.add_argument('--cost_lim', type=float, default=10)
+    parser.add_argument('--reward_penalized', action='store_true')
+    parser.add_argument('--objective_penalized', action='store_true')
+    parser.add_argument('--learn_penalty', action='store_true')
+    parser.add_argument('--penalty_param_loss', action='store_true')
     parser.add_argument('--exp_name', type=str, default='ppo_safe_50ep')
     args = parser.parse_args()
 
@@ -374,9 +430,42 @@ if __name__ == '__main__':
     # 'robot_locations': [(0, 0)],
     # 'robot_rot': 0,
 
+    # Prepare agent
+    agent_kwargs = dict(reward_penalized=args.reward_penalized,
+                        objective_penalized=args.objective_penalized,
+                        learn_penalty=args.learn_penalty,
+                        penalty_param_loss=args.penalty_param_loss)
+
+    cpo_agent_kwargs = dict(reward_penalized=True,
+                        objective_penalized=args.objective_penalized,
+                        learn_penalty=args.learn_penalty,
+                        penalty_param_loss=args.penalty_param_loss)
+
+    print("agent keyword args")
+    print(agent_kwargs)
+
 # Run experiment
+#     ppo(lambda: gym.make(args.env),
+#         actor_critic=MLPActorCritic,
+#         agent= PPOAgent(**agent_kwargs),
+#         ac_kwargs=dict(hidden_sizes=[args.hid] * args.l),
+#         gamma=args.gamma, seed=args.seed,
+#         steps_per_epoch=args.steps,
+#         epochs=args.epochs,
+#         logger_kwargs=logger_kwargs)
+
+    print("done with PPO, starting with CPO")
+
+    # if args.agent == 'ppo':
+    #     agent = PPOAgent(**agent_kwargs)
+    # elif args.agent == 'trpo':
+    #     agent = TRPOAgent(**agent_kwargs)
+    # elif args.agent == 'cpo':
+    #     agent = CPOAgent(**agent_kwargs)
+
     ppo(lambda: gym.make(args.env),
         actor_critic=MLPActorCritic,
+        agent=CPOAgent(**cpo_agent_kwargs),
         ac_kwargs=dict(hidden_sizes=[args.hid] * args.l),
         gamma=args.gamma, seed=args.seed,
         steps_per_epoch=args.steps,

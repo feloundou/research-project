@@ -118,6 +118,7 @@ class MLPActorCritic(nn.Module):
 
         # build value function
         self.v = MLPCritic(obs_dim, hidden_sizes, activation)
+        self.vc = MLPCritic(obs_dim, hidden_sizes, activation)
 
 
     def step(self, obs):
@@ -126,7 +127,8 @@ class MLPActorCritic(nn.Module):
             a = pi.sample()
             logp_a = self.pi._log_prob_from_distribution(pi, a)
             v = self.v(obs)
-        return a.numpy(), v.numpy(), logp_a.numpy()
+            vc = self.vc(obs)
+        return a.numpy(), v.numpy(), vc.numpy(), logp_a.numpy()
 
     def act(self, obs):
         return self.step(obs)[0]
