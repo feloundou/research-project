@@ -30,10 +30,7 @@ def discount_cumsum(x, discount):
     """
     magic from rllab for computing discounted cumulative sums of vectors.
     input:
-        vector x,
-        [x0,
-         x1,
-         x2]
+        vector x, [x0, x1,  x2]
     output:
         [x0 + discount * x1 + discount^2 * x2,
          x1 + discount * x2,
@@ -118,6 +115,7 @@ class MLPActorCritic(nn.Module):
 
         # build value function
         self.v = MLPCritic(obs_dim, hidden_sizes, activation)
+        self.pen = MLPCritic(obs_dim, hidden_sizes, activation)
         self.vc = MLPCritic(obs_dim, hidden_sizes, activation)
 
 
@@ -128,7 +126,8 @@ class MLPActorCritic(nn.Module):
             logp_a = self.pi._log_prob_from_distribution(pi, a)
             v = self.v(obs)
             vc = self.vc(obs)
-        return a.numpy(), v.numpy(), vc.numpy(), logp_a.numpy()
+            pen = self.pen(obs)
+        return a.numpy(), v.numpy(), vc.numpy(), logp_a.numpy(), pen.numpy()
 
     def act(self, obs):
         return self.step(obs)[0]

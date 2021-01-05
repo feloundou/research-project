@@ -1,4 +1,4 @@
-program: run_safeppoagent_torch.py
+program: run_policy_agent.py
 method: bayes
 #metric:
 #  name: val_loss

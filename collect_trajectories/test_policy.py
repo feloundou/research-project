@@ -128,6 +128,14 @@ _, get_action = load_policy_and_env(args.fpath,
 
 env = gym.make('Safexp-PointGoal1-v0')
 run_policy(env, get_action, args.len, args.episodes, not (args.norender))
+
+# import replay buffer object, populate with actions, rewards, dones, info
+# save it to a file, then you have a bunch of environment interactions from a given policy
+
+
+
+
+# store all intermediate action, data, similar to
 # >>> env = your_env.make()
 # >>> run_policy(env, get_action)
 

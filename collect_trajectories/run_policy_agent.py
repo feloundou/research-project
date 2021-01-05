@@ -1,3 +1,4 @@
+
 import sys
 from cpprb import ReplayBuffer
 import numpy as np
@@ -5,6 +6,8 @@ import numpy as np
 print(sys.path)
 
 from torch.optim import Adam
+from torch.nn import Parameter
+
 from adabelief_pytorch import AdaBelief
 
 import gym
@@ -17,10 +20,7 @@ from agent_types import *
 
 import wandb
 wandb.login()
-
-wandb.init(name = "saferun", project="safe-ppo-agent")
-
-
+wandb.init(name="penalty_run", project="safe-ppo-agent")
 
 
 # Define PPO functions
@@ -37,7 +37,7 @@ def ppo(env_fn,
         # Discount factors:
         gamma=0.99,
         lam=0.97,
-        cost_gamma = 0.99,
+        cost_gamma=0.99,
         cost_lam=0.97,
         # Policy Learning:
         ent_reg=0.,
@@ -46,7 +46,7 @@ def ppo(env_fn,
         penalty_init=1.,
         penalty_lr=5e-2,
         # KL divergence:
-        target_kl = 0.01,
+        target_kl=0.01,
         # Value learning:
         vf_lr=1e-3,
         train_v_iters=80,
@@ -57,7 +57,6 @@ def ppo(env_fn,
         clip_ratio=0.2,
         logger_kwargs=dict(),
         save_freq=10):
-
     """
     Proximal Policy Optimization (by clipping),
     with early stopping based on approximate KL
@@ -167,11 +166,35 @@ def ppo(env_fn,
     print("Objective penalized:", agent.objective_penalized)
     print("Reward penalized:", agent.reward_penalized)
 
-
     # Set up experience buffer
     local_steps_per_epoch = int(steps_per_epoch / num_procs())
     # buf = PPOBuffer(obs_dim, act_dim, local_steps_per_epoch, gamma, lam)
     buf = CostPOBuffer(obs_dim, act_dim, local_steps_per_epoch, gamma, lam)
+
+
+
+    # Penalty
+    if agent.use_penalty:
+        param_init = np.log(max(np.exp(penalty_init) - 1, 1e-8))
+        print("param init: ", param_init)
+        penalty_param = Parameter(torch.from_numpy(np.asarray(param_init)).float())
+        print("penalty param: ", penalty_param)
+
+        penalty = torch.nn.Softplus(penalty_param)
+        print("current penalty: ", penalty)
+
+    # if agent.learn_penalty:
+    #     if agent.penalty_param_loss:
+    #         penalty_loss = -penalty_param * (cur_cost_ph - cost_lim)
+    #     else:
+    #         penalty_loss = -penalty * (cur_cost_ph - cost_lim)
+    #     train_penalty = MpiAdamOptimizer(learning_rate=penalty_lr).minimize(penalty_loss)
+
+    # Set up optimizers for policy and value function
+    pi_optimizer = Adam(ac.pi.parameters(), lr=pi_lr)
+    print("value parameters:", ac.v.parameters())
+    vf_optimizer = Adam(ac.v.parameters(), lr=vf_lr)
+    penalty_optimizer = Adam(ac.pen.parameters(), lr=penalty_lr)
 
     # Set up function for computing PPO policy loss
     def compute_loss_pi(data):
@@ -196,7 +219,7 @@ def ppo(env_fn,
     # Set up functions for computing value loss(es)
     def compute_loss_v(data):
         obs, ret, cret = data['obs'], data['ret'], data['cret']
-        v_loss = ((ac.v(obs) - ret)**2).mean()
+        v_loss = ((ac.v(obs) - ret) ** 2).mean()
         return v_loss
 
     def compute_loss_vc(data):
@@ -204,10 +227,7 @@ def ppo(env_fn,
         vc_loss = ((ac.v(obs) - cret) ** 2).mean()
         return vc_loss
 
-    # Set up optimizers for policy and value function
-    pi_optimizer = Adam(ac.pi.parameters(), lr=pi_lr)
-    # print("value parameters:", ac.v.parameters())
-    vf_optimizer = Adam(ac.v.parameters(), lr=vf_lr)
+
 
     # Set up model saving
     logger.setup_pytorch_saver(ac)
@@ -217,18 +237,20 @@ def ppo(env_fn,
 
         cur_cost = logger.get_stats('EpCost')[0]
         c = cur_cost - cost_lim
+        # pen = logger.get_stats('EpPenalty')[0]
 
         if c > 0 and agent.cares_about_cost:
             logger.log('Warning! Safety constraint is already violated.', 'red')
 
         print("current cost: ", cur_cost)
         print("cost-limit: ", c)
+        # print("penalty: ", pen)
 
         data = buf.get()
 
         pi_l_old, pi_info_old = compute_loss_pi(data)
         pi_l_old = pi_l_old.item()
-        v_l_old= compute_loss_v(data).item()
+        v_l_old = compute_loss_v(data).item()
         vc_l_old = compute_loss_vc(data).item()
 
         if agent.reward_penalized:
@@ -261,6 +283,15 @@ def ppo(env_fn,
             mpi_avg_grads(ac.v)  # average grads across MPI processes
             vf_optimizer.step()
 
+        # Penalty function learning
+        # for i in range(train_v_iters):
+        #     penalty_optimizer.zero_grad()
+        #     penalty_loss = -penalty * (cur_cost - cost_lim)
+        #
+        #     penalty_loss.backward()
+        #     mpi_avg_grads(ac.pen)  # average grads across MPI processes
+        #     penalty_optimizer.step()
+
         # Log changes from update
         kl, ent, cf = pi_info['kl'], pi_info_old['ent'], pi_info['cf']
         logger.store(LossPi=pi_l_old, LossV=v_l_old,
@@ -272,7 +303,7 @@ def ppo(env_fn,
                           'loss vc': vc_l_old,
                           'loss pi': pi_l_old,
                           'KL': kl
-                       }
+                          }
 
         wandb.log(update_metrics)
 
@@ -285,8 +316,15 @@ def ppo(env_fn,
 
     # Main loop: collect experience in env and update/log each epoch
     for epoch in range(epochs):
+        if agent.use_penalty:
+            pass
+            # cur_penalty = sess.run(penalty)
+
         for t in range(local_steps_per_epoch):
-            a, v, vc, logp = ac.step(torch.as_tensor(o, dtype=torch.float32))
+            a, v, vc, logp, pen = ac.step(torch.as_tensor(o, dtype=torch.float32))
+            cur_penalty = pen
+            print("current penalty: ", cur_penalty)
+
 
             # vc = v # placeholder Tyna Note
 
@@ -311,12 +349,10 @@ def ppo(env_fn,
                 # buf.store(o, a, r_total, v_t, 0, 0, logp_t, pi_info_t)
                 buf.store(o, a, r_total, v, 0, 0, logp, info)
             else:
-                buf.store(o, a, r,       v, c, vc, logp, info)
+                buf.store(o, a, r, v, c, vc, logp, info)
 
             # save and log
-            # buf.store(o, a, r, v, logp)
-            # buf.store(o, a, r, v, c, vc, logp, d, next_o)
-            # buf.store(o, a, r, v, c, vc, logp, next_o)
+
             logger.store(VVals=v)
 
             # Update obs (critical!)
@@ -331,7 +367,7 @@ def ppo(env_fn,
                     print('Warning: trajectory cut off by epoch at %d steps.' % ep_len, flush=True)
                 # if trajectory didn't reach terminal state, bootstrap value target
                 if timeout or epoch_ended:
-                    _, v, _, _ = ac.step(torch.as_tensor(o, dtype=torch.float32))
+                    _, v, _, _, _ = ac.step(torch.as_tensor(o, dtype=torch.float32))
                 else:
                     v = 0
                 buf.finish_path(v)
@@ -358,7 +394,7 @@ def ppo(env_fn,
                        'value': v,
                        'cost rate': cost_rate,
                        'cumulative cost': cumulative_cost,
-                        }
+                       }
 
         wandb.log(log_metrics)
 
@@ -437,22 +473,22 @@ if __name__ == '__main__':
                         penalty_param_loss=args.penalty_param_loss)
 
     cpo_agent_kwargs = dict(reward_penalized=True,
-                        objective_penalized=args.objective_penalized,
-                        learn_penalty=args.learn_penalty,
-                        penalty_param_loss=args.penalty_param_loss)
+                            objective_penalized=args.objective_penalized,
+                            learn_penalty=args.learn_penalty,
+                            penalty_param_loss=args.penalty_param_loss)
 
     print("agent keyword args")
     print(agent_kwargs)
 
-# Run experiment
-#     ppo(lambda: gym.make(args.env),
-#         actor_critic=MLPActorCritic,
-#         agent= PPOAgent(**agent_kwargs),
-#         ac_kwargs=dict(hidden_sizes=[args.hid] * args.l),
-#         gamma=args.gamma, seed=args.seed,
-#         steps_per_epoch=args.steps,
-#         epochs=args.epochs,
-#         logger_kwargs=logger_kwargs)
+    # Run experiment
+    #     ppo(lambda: gym.make(args.env),
+    #         actor_critic=MLPActorCritic,
+    #         agent= PPOAgent(**agent_kwargs),
+    #         ac_kwargs=dict(hidden_sizes=[args.hid] * args.l),
+    #         gamma=args.gamma, seed=args.seed,
+    #         steps_per_epoch=args.steps,
+    #         epochs=args.epochs,
+    #         logger_kwargs=logger_kwargs)
 
     print("done with PPO, starting with CPO")
 

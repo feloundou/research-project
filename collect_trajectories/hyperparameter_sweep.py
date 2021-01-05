@@ -1,4 +1,4 @@
-from run_safeppoagent_torch import *
+from run_policy_agent import *
 
 
 # Experimentation
