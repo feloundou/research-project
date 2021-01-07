@@ -965,13 +965,11 @@ class ExperimentGrid:
 
 class PPOBuffer:
     """
-    A buffer for storing trajectories experienced by a PPO agent interacting
-    with the environment, and using Generalized Advantage Estimation (GAE-Lambda)
-    for calculating the advantages of state-action pairs.
+    A buffer for storing trajectories experienced by a PPO agent interacting with the environment,
+    and using Generalized Advantage Estimation (GAE-Lambda) for calculating the advantages of state-action pairs.
 
-    Generalized Advantage Estimation:
-    Forks the different runs across cores, message passes using mpi_fork,
-    calculates the average of advantage, then descends.
+    Generalized Advantage Estimation: Forks the different runs across cores, message passes
+    using mpi_fork, calculates the average of advantage, then descends.
     """
 
     def __init__(self, obs_dim, act_dim, size, gamma=0.99, lam=0.95, cost_gamma=0.99, cost_lam=0.95):
@@ -993,14 +991,12 @@ class PPOBuffer:
         self.ptr, self.path_start_idx, self.max_size = 0, 0, size
 
 
-        self.rb = ReplayBuffer(size,
-                          env_dict={"obs": {"shape": obs_dim},
-                                    "act": {"shape": act_dim},
-                                    "rew": {},
-                                    "next_obs": {"shape": obs_dim},
-                                    "done": {}
-                                    }
-                               )
+        # self.rb = ReplayBuffer(size,
+        #                   env_dict={"obs": {"shape": obs_dim},
+        #                             "act": {"shape": act_dim},
+        #                             "rew": {}, "next_obs": {"shape": obs_dim}, "done": {}
+        #                             }
+        #                        )
 
     # def store(self, obs, act, rew, val, cost, cval, logp, done, next_obs):
     def store(self, obs, act, rew, val, cost, cval, logp, next_obs):
@@ -1094,7 +1090,6 @@ class PPOBuffer:
 
 
 class CostPOBuffer:
-
     # def __init__(self, size,
     #              obs_shape, act_shape, pi_info_shapes,
     #              gamma=0.99, lam=0.95,
@@ -1158,7 +1153,6 @@ class CostPOBuffer:
         cdeltas = costs[:-1] + self.gamma * cvals[1:] - cvals[:-1]
         self.cadv_buf[path_slice] = discount_cumsum(cdeltas, self.cost_gamma * self.cost_lam)
         self.cret_buf[path_slice] = discount_cumsum(costs, self.cost_gamma)[:-1]
-
         self.path_start_idx = self.ptr
 
     def get(self):
@@ -1187,6 +1181,27 @@ class CostPOBuffer:
 
 
 
+"""
+Conjugate gradient
+"""
+
+def cg(Ax, b, cg_iters=10):
+    x = np.zeros_like(b)
+    r = b.copy() # Note: should be 'b - Ax(x)', but for x=0, Ax(x)=0. Change if doing warm start.
+    p = r.copy()
+    r_dot_old = np.dot(r,r)
+    for _ in range(cg_iters):
+        z = Ax(p)
+        alpha = r_dot_old / (np.dot(p, z) + EPS)
+        x += alpha * p
+        r -= alpha * z
+        r_dot_new = np.dot(r,r)
+        p = r + (r_dot_new / r_dot_old) * p
+        r_dot_old = r_dot_new
+    return x
+
+
+
 def test_eg():
     eg = ExperimentGrid()
     eg.add('test:a', [1, 2, 3], 'ta', True)
@@ -1196,3 +1211,4 @@ def test_eg():
     eg.add('huh', 5)
     eg.add('no', 6, in_name=True)
     return eg.variants()
+

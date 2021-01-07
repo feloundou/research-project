@@ -20,8 +20,7 @@ from agent_types import *
 
 import wandb
 wandb.login()
-wandb.init(name="penalty_run", project="safe-ppo-agent")
-
+wandb.init(project="safe-ppo-agent")
 
 # Define PPO functions
 
@@ -153,6 +152,9 @@ def ppo(env_fn,
     # Create actor-critic module
     ac = actor_critic(env.observation_space, env.action_space, **ac_kwargs)
 
+    # print("actor critic parameters: ", [p for p in ac.parameters() if p.requires_grad])
+    # print("even more info: ", ac.pen.penalty_param )
+
     # Sync params across processes
     sync_params(ac)
 
@@ -173,15 +175,15 @@ def ppo(env_fn,
 
 
 
-    # Penalty
-    if agent.use_penalty:
-        param_init = np.log(max(np.exp(penalty_init) - 1, 1e-8))
-        print("param init: ", param_init)
-        penalty_param = Parameter(torch.from_numpy(np.asarray(param_init)).float())
-        print("penalty param: ", penalty_param)
-
-        penalty = torch.nn.Softplus(penalty_param)
-        print("current penalty: ", penalty)
+    # # Penalty
+    # if agent.use_penalty:
+    #     param_init = np.log(max(np.exp(penalty_init) - 1, 1e-8))
+    #     print("param init: ", param_init)
+    #     penalty_param = Parameter(torch.from_numpy(np.asarray(param_init)).float())
+    #     print("penalty param: ", penalty_param)
+    #
+    #     penalty = torch.nn.Softplus(penalty_param)
+    #     # print("current penalty: ", penalty)
 
     # if agent.learn_penalty:
     #     if agent.penalty_param_loss:
@@ -194,7 +196,10 @@ def ppo(env_fn,
     pi_optimizer = Adam(ac.pi.parameters(), lr=pi_lr)
     print("value parameters:", ac.v.parameters())
     vf_optimizer = Adam(ac.v.parameters(), lr=vf_lr)
+    # penalty_optimizer = Adam(ac.pen.parameters(), lr=penalty_lr)
     penalty_optimizer = Adam(ac.pen.parameters(), lr=penalty_lr)
+
+    penalty = np.log(max(np.exp(penalty_init)-1, 1e-8))
 
     # Set up function for computing PPO policy loss
     def compute_loss_pi(data):
@@ -220,24 +225,37 @@ def ppo(env_fn,
     def compute_loss_v(data):
         obs, ret, cret = data['obs'], data['ret'], data['cret']
         v_loss = ((ac.v(obs) - ret) ** 2).mean()
+        # print("value tensor: ", ac.v(obs))
         return v_loss
 
     def compute_loss_vc(data):
         obs, ret, cret = data['obs'], data['ret'], data['cret']
-        vc_loss = ((ac.v(obs) - cret) ** 2).mean()
+        vc_loss = ((ac.vc(obs) - cret) ** 2).mean()
         return vc_loss
 
+    def compute_loss_penalty(data):
+        obs,  cret = data['obs'],  data['cret']
+        # print("try")
+        # print(next(ac.pen.parameters()).data)
+        # with torch.no_grad():
+        # penalty_loss = ac.pen.parameters()
+        penalty_loss = ((- ac.pen(obs) *( cret - cost_lim))).mean()
+            # penalty_loss = ((-(next(ac.pen.parameters()).data * (cret - cost_lim)))).mean()
+        print("pen obs: ", penalty_loss)
 
+        return penalty_loss
 
     # Set up model saving
     logger.setup_pytorch_saver(ac)
+
+    # penalty_param = torch.nn.Parameter(t.tensor(0.01))
+
 
     def update():
         print("Starting update")
 
         cur_cost = logger.get_stats('EpCost')[0]
-        c = cur_cost - cost_lim
-        # pen = logger.get_stats('EpPenalty')[0]
+        # c = cur_cost - cost_lim
 
         if c > 0 and agent.cares_about_cost:
             logger.log('Warning! Safety constraint is already violated.', 'red')
@@ -279,18 +297,20 @@ def ppo(env_fn,
         for i in range(train_v_iters):
             vf_optimizer.zero_grad()
             loss_v = compute_loss_v(data)
+            # print("value loss: ", loss_v)
             loss_v.backward()
             mpi_avg_grads(ac.v)  # average grads across MPI processes
             vf_optimizer.step()
 
         # Penalty function learning
-        # for i in range(train_v_iters):
-        #     penalty_optimizer.zero_grad()
-        #     penalty_loss = -penalty * (cur_cost - cost_lim)
-        #
-        #     penalty_loss.backward()
-        #     mpi_avg_grads(ac.pen)  # average grads across MPI processes
-        #     penalty_optimizer.step()
+        for i in range(train_v_iters):
+            penalty_optimizer.zero_grad()
+            loss_pen = compute_loss_penalty(data)
+            # print("penalty loss: ", loss_pen)
+            loss_pen.backward()
+            mpi_avg_grads(ac.pen)  # average grads across MPI processes
+            # print("mpi pen: ", ac.pen)
+            penalty_optimizer.step()
 
         # Log changes from update
         kl, ent, cf = pi_info['kl'], pi_info_old['ent'], pi_info['cf']
@@ -310,26 +330,30 @@ def ppo(env_fn,
     # Prepare for interaction with environment
     start_time = time.time()
     # o, ep_ret, ep_len = env.reset(), 0, 0
-    o, r, d, c, ep_ret, ep_cost, ep_len = env.reset(), 0, False, 0, 0, 0, 0
-    cur_penalty = 0
-    cum_cost = 0
+    o, r, d, c, ep_ret, ep_cost, ep_len, cur_penalty, cum_cost = \
+        env.reset(), 0, False, 0, 0, 0, 0, 0, 0
+    # cur_penalty = 0
+    # cum_cost = 0
 
     # Main loop: collect experience in env and update/log each epoch
     for epoch in range(epochs):
-        if agent.use_penalty:
-            pass
-            # cur_penalty = sess.run(penalty)
+        # print("dimo: ",  o.shape)
+        # cur_penalty = ac.pen(cur_penalty)
+        # print("epic current pen: ", cur_penalty)
+        # if agent.use_penalty:
+        #     pass
+        #     cur_penalty = sess.run(penalty)
+        cur_penalty = ac.pen.pen_param
+        print("model updated pen: ", cur_penalty)
 
         for t in range(local_steps_per_epoch):
             a, v, vc, logp, pen = ac.step(torch.as_tensor(o, dtype=torch.float32))
-            cur_penalty = pen
-            print("current penalty: ", cur_penalty)
 
+            # print("penalty sorti: ", pen)
 
-            # vc = v # placeholder Tyna Note
-
-            # env.step
+            # env.step => Take action
             next_o, r, d, info = env.step(a)
+            # print("outputs: next_o, r, d, info: ", next_o, r, d, info)
 
             # Include penalty on cost
             c = info.get('cost', 0)
@@ -345,14 +369,15 @@ def ppo(env_fn,
 
             if agent.reward_penalized:
                 r_total = r - cur_penalty * c
-                r_total = r_total / (1 + cur_penalty)
+                r_total /= (1 + cur_penalty)
+
+                print("reward total: ", r_total)
                 # buf.store(o, a, r_total, v_t, 0, 0, logp_t, pi_info_t)
                 buf.store(o, a, r_total, v, 0, 0, logp, info)
             else:
                 buf.store(o, a, r, v, c, vc, logp, info)
 
             # save and log
-
             logger.store(VVals=v)
 
             # Update obs (critical!)
@@ -367,10 +392,17 @@ def ppo(env_fn,
                     print('Warning: trajectory cut off by epoch at %d steps.' % ep_len, flush=True)
                 # if trajectory didn't reach terminal state, bootstrap value target
                 if timeout or epoch_ended:
-                    _, v, _, _, _ = ac.step(torch.as_tensor(o, dtype=torch.float32))
+                    _, v, vc , _, _ = ac.step(torch.as_tensor(o, dtype=torch.float32))
+                    last_v = v
+                    if agent.reward_penalized:
+                        last_vc = 0
+                    else:
+                        last_vc = vc
                 else:
-                    v = 0
-                buf.finish_path(v)
+                    last_v = 0
+                buf.finish_path(last_v, last_vc)
+
+                # sess.run looks like ac.step
 
                 if terminal:
                     # only save EpRet / EpLen if trajectory finished
@@ -472,10 +504,28 @@ if __name__ == '__main__':
                         learn_penalty=args.learn_penalty,
                         penalty_param_loss=args.penalty_param_loss)
 
-    cpo_agent_kwargs = dict(reward_penalized=True,
-                            objective_penalized=args.objective_penalized,
-                            learn_penalty=args.learn_penalty,
-                            penalty_param_loss=args.penalty_param_loss)
+    trpo_kwargs = dict(
+        reward_penalized=False,
+        objective_penalized=False,
+        learn_penalty=False,
+        penalty_param_loss=False  # Irrelevant in unconstrained
+    )
+
+    ppo_kwargs = dict(
+        reward_penalized=False,
+        objective_penalized=False,
+        learn_penalty=False,
+        penalty_param_loss=False  # Irrelevant in unconstrained
+    )
+
+    cpo_kwargs = dict(
+        reward_penalized=False,  # Irrelevant in CPO
+        objective_penalized=False,  # Irrelevant in CPO
+        learn_penalty=False,  # Irrelevant in CPO
+        penalty_param_loss=False  # Irrelevant in CPO
+    )
+
+
 
     print("agent keyword args")
     print(agent_kwargs)
@@ -501,15 +551,18 @@ if __name__ == '__main__':
 
     ppo(lambda: gym.make(args.env),
         actor_critic=MLPActorCritic,
-        agent=CPOAgent(**cpo_agent_kwargs),
+        agent=CPOAgent(**cpo_kwargs),
         ac_kwargs=dict(hidden_sizes=[args.hid] * args.l),
         gamma=args.gamma, seed=args.seed,
         steps_per_epoch=args.steps,
         epochs=args.epochs,
         logger_kwargs=logger_kwargs)
 
-wandb.config.update(args)
 
-wandb.finish()
+# all_args = parser.parse_args()
+
+    wandb.config.update(args)
+
+    wandb.finish()
 
 # reward function: r - penalty*cost

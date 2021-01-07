@@ -2,6 +2,9 @@ import numpy as np
 import scipy.signal
 from gym.spaces import Box, Discrete
 
+from torch.nn import Parameter
+
+
 import torch
 import torch.nn as nn
 from torch.distributions.normal import Normal
@@ -37,6 +40,9 @@ def discount_cumsum(x, discount):
          x2]
     """
     return scipy.signal.lfilter([1], [1, float(-discount)], x[::-1], axis=0)[::-1]
+
+
+
 
 
 class Actor(nn.Module):
@@ -95,8 +101,39 @@ class MLPCritic(nn.Module):
         super().__init__()
         self.v_net = mlp([obs_dim] + list(hidden_sizes) + [1], activation)
 
+
     def forward(self, obs):
         return torch.squeeze(self.v_net(obs), -1)  # Critical to ensure v has right shape.
+
+class MLPCriticPenalty(nn.Module):
+
+    def __init__(self, obs_dim, hidden_sizes, activation):
+        super().__init__()
+        # self.v_net = mlp([obs_dim] + list(hidden_sizes) + [1], activation)
+        penalty_init = 1.
+        param_init = np.log(max(np.exp(penalty_init) - 1, 1e-8))
+        self.pen_param = torch.tensor(param_init)
+        # self.fc2(self.fc(emb))
+        self.fc = nn.Linear(1, 64)
+        self.fc2 = nn.Linear(64, 1)
+        # self.act = nn.Tanh
+        # self.penalty_param = Parameter(torch.from_numpy(np.asarray(param_init)), requires_grad=True)
+    #
+    def forward(self, x):
+        new=torch.from_numpy(np.asarray(1.))
+        embedding = nn.Embedding(4, 1)
+        # a batch of 2 samples of 4 indices each
+        input = torch.LongTensor([[1]])
+        emb = embedding(input)
+        # print("embedding: ", emb )
+        # print("before: ", self.pen_param)
+
+        self.pen_param = torch.tanh((self.fc2(self.fc(emb))))
+        # print("after: ", self.pen_param)
+
+        return self.pen_param
+        # return torch.squeeze(self.v_net(obs), -1)  # Critical to ensure v has right shape.
+
 
 
 class MLPActorCritic(nn.Module):
@@ -113,10 +150,12 @@ class MLPActorCritic(nn.Module):
         elif isinstance(action_space, Discrete):
             self.pi = MLPCategoricalActor(obs_dim, action_space.n, hidden_sizes, activation)
 
-        # build value function
+        # build value function critics
         self.v = MLPCritic(obs_dim, hidden_sizes, activation)
-        self.pen = MLPCritic(obs_dim, hidden_sizes, activation)
         self.vc = MLPCritic(obs_dim, hidden_sizes, activation)
+
+        # self.pen = MLPCritic(obs_dim, hidden_sizes, activation=nn.Softplus) #if penalty_param_loss is false
+        self.pen = MLPCriticPenalty(obs_dim, hidden_sizes, activation)
 
 
     def step(self, obs):
@@ -127,6 +166,7 @@ class MLPActorCritic(nn.Module):
             v = self.v(obs)
             vc = self.vc(obs)
             pen = self.pen(obs)
+
         return a.numpy(), v.numpy(), vc.numpy(), logp_a.numpy(), pen.numpy()
 
     def act(self, obs):

@@ -1,0 +1,14 @@
+wandb_version: 1
+
+cost_gamma:
+  value: 0.9826091977752787
+cost_lim:
+  value: 0
+epochs:
+  value: 1000
+gamma:
+  value: 0.9941143062462914
+optim_mode:
+  value: adam
+seed:
+  value: 0

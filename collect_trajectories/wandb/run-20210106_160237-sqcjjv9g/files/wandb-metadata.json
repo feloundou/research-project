@@ -1,0 +1,22 @@
+{
+    "os": "Linux-5.4.0-59-generic-x86_64-with-glibc2.29",
+    "python": "3.8.5",
+    "heartbeatAt": "2021-01-06T21:02:38.560744",
+    "startedAt": "2021-01-06T21:02:37.711162",
+    "docker": null,
+    "cpu_count": 4,
+    "cuda": null,
+    "args": [],
+    "state": "running",
+    "codePath": "collect_trajectories/hparam_sweep.py",
+    "program": "/home/tyna/Documents/openai/research-project/collect_trajectories/hparam_sweep.py",
+    "git": {
+        "remote": "https://github.com/feloundou/research-project.git",
+        "commit": "f8187b1a9c81da43a807e7c31f46115301f5c1cd"
+    },
+    "email": "mfe25@cornell.edu",
+    "root": "/home/tyna/Documents/openai/research-project",
+    "host": "tyna-server",
+    "username": "tyna",
+    "executable": "/usr/bin/python3.8"
+}

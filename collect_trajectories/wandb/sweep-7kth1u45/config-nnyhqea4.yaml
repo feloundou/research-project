@@ -1,0 +1,10 @@
+wandb_version: 1
+
+cost_gamma:
+  value: 0.981037672614418
+cost_lim:
+  value: 20
+gamma:
+  value: 0.9927386517955962
+optim_mode:
+  value: lbgfs

@@ -1,0 +1,22 @@
+{
+    "os": "Linux-5.4.0-59-generic-x86_64-with-glibc2.29",
+    "python": "3.8.5",
+    "heartbeatAt": "2021-01-06T00:04:02.719511",
+    "startedAt": "2021-01-06T00:04:01.925638",
+    "docker": null,
+    "cpu_count": 4,
+    "cuda": null,
+    "args": [],
+    "state": "running",
+    "codePath": "collect_trajectories/run_cpo_agent.py",
+    "program": "/home/tyna/Documents/openai/research-project/collect_trajectories/run_cpo_agent.py",
+    "git": {
+        "remote": "https://github.com/feloundou/research-project.git",
+        "commit": "f8187b1a9c81da43a807e7c31f46115301f5c1cd"
+    },
+    "email": "mfe25@cornell.edu",
+    "root": "/home/tyna/Documents/openai/research-project",
+    "host": "tyna-server",
+    "username": "tyna",
+    "executable": "/usr/bin/python3.8"
+}
