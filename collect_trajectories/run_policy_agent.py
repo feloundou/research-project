@@ -20,7 +20,10 @@ from agent_types import *
 
 import wandb
 wandb.login()
-wandb.init(project="safe-ppo-agent")
+
+PROJECT_NAME = 'ppo_500e_8hz_fixedpen_rew1_lim25'
+# 4 million env interactions
+wandb.init(project="safe-ppo-500e-experts", name= PROJECT_NAME)
 
 # Define PPO functions
 
@@ -146,6 +149,13 @@ def ppo(env_fn,
 
     # Instantiate environment
     env = env_fn()
+    # env = lambda: gym.make('Safe')
+    # env.hazards_cost = 2
+    # env.constrain_hazards = False
+
+
+    print("changed the environment")
+    print(env.constrain_hazards)
     obs_dim = env.observation_space.shape
     act_dim = env.action_space.shape
 
@@ -162,11 +172,11 @@ def ppo(env_fn,
     var_counts = tuple(count_vars(module) for module in [ac.pi, ac.v])
     logger.log('\nNumber of parameters: \t pi: %d, \t v: %d\n' % var_counts)
 
-    print("Agent parameters")
-    print("Learn penalty:", agent.learn_penalty)
-    print("Use penalty:", agent.use_penalty)
-    print("Objective penalized:", agent.objective_penalized)
-    print("Reward penalized:", agent.reward_penalized)
+    # print("Agent parameters")
+    # print("Learn penalty:", agent.learn_penalty)
+    # print("Use penalty:", agent.use_penalty)
+    # print("Objective penalized:", agent.objective_penalized)
+    # print("Reward penalized:", agent.reward_penalized)
 
     # Set up experience buffer
     local_steps_per_epoch = int(steps_per_epoch / num_procs())
@@ -194,9 +204,8 @@ def ppo(env_fn,
 
     # Set up optimizers for policy and value function
     pi_optimizer = Adam(ac.pi.parameters(), lr=pi_lr)
-    print("value parameters:", ac.v.parameters())
+    # print("value parameters:", ac.v.parameters())
     vf_optimizer = Adam(ac.v.parameters(), lr=vf_lr)
-    # penalty_optimizer = Adam(ac.pen.parameters(), lr=penalty_lr)
     penalty_optimizer = Adam(ac.pen.parameters(), lr=penalty_lr)
 
     penalty = np.log(max(np.exp(penalty_init)-1, 1e-8))
@@ -241,7 +250,7 @@ def ppo(env_fn,
         # penalty_loss = ac.pen.parameters()
         penalty_loss = ((- ac.pen(obs) *( cret - cost_lim))).mean()
             # penalty_loss = ((-(next(ac.pen.parameters()).data * (cret - cost_lim)))).mean()
-        print("pen obs: ", penalty_loss)
+        # print("pen obs: ", penalty_loss)
 
         return penalty_loss
 
@@ -252,7 +261,7 @@ def ppo(env_fn,
 
 
     def update():
-        print("Starting update")
+        # print("Starting update")
 
         cur_cost = logger.get_stats('EpCost')[0]
         # c = cur_cost - cost_lim
@@ -261,7 +270,7 @@ def ppo(env_fn,
             logger.log('Warning! Safety constraint is already violated.', 'red')
 
         print("current cost: ", cur_cost)
-        print("cost-limit: ", c)
+        # print("cost-limit: ", c)
         # print("penalty: ", pen)
 
         data = buf.get()
@@ -276,8 +285,8 @@ def ppo(env_fn,
         else:
             total_value_loss = v_l_old + vc_l_old
 
-        print("loss v_old: ", v_l_old)
-        print("constrained loss vc_old: ", vc_l_old)
+        # print("loss v_old: ", v_l_old)
+        # print("constrained loss vc_old: ", vc_l_old)
 
         # Train policy with multiple steps of gradient descent
         for i in range(train_pi_iters):
@@ -319,10 +328,14 @@ def ppo(env_fn,
                      DeltaLossPi=(loss_pi.item() - pi_l_old),
                      DeltaLossV=(loss_v.item() - v_l_old))
 
-        update_metrics = {'loss v': v_l_old,
-                          'loss vc': vc_l_old,
-                          'loss pi': pi_l_old,
-                          'KL': kl
+        vf_loss_avg = mpi_avg(v_l_old)
+        pi_loss_avg = mpi_avg(pi_l_old)
+
+        update_metrics = {
+                        'value function loss': vf_loss_avg,
+                          # 'loss vc': vc_l_old,
+                          'policy loss': pi_loss_avg,
+                          # 'KL': kl
                           }
 
         wandb.log(update_metrics)
@@ -330,26 +343,22 @@ def ppo(env_fn,
     # Prepare for interaction with environment
     start_time = time.time()
     # o, ep_ret, ep_len = env.reset(), 0, 0
-    o, r, d, c, ep_ret, ep_cost, ep_len, cur_penalty, cum_cost = \
-        env.reset(), 0, False, 0, 0, 0, 0, 0, 0
+    o, r, d, c, ep_ret, ep_cost, ep_len, cur_penalty, cum_cost, cum_reward = \
+        env.reset(), 0, False, 0, 0, 0, 0, 0, 0, 0
     # cur_penalty = 0
     # cum_cost = 0
 
     # Main loop: collect experience in env and update/log each epoch
     for epoch in range(epochs):
-        # print("dimo: ",  o.shape)
-        # cur_penalty = ac.pen(cur_penalty)
-        # print("epic current pen: ", cur_penalty)
+
         # if agent.use_penalty:
         #     pass
         #     cur_penalty = sess.run(penalty)
         cur_penalty = ac.pen.pen_param
-        print("model updated pen: ", cur_penalty)
+        # print("model updated pen: ", cur_penalty)
 
         for t in range(local_steps_per_epoch):
             a, v, vc, logp, pen = ac.step(torch.as_tensor(o, dtype=torch.float32))
-
-            # print("penalty sorti: ", pen)
 
             # env.step => Take action
             next_o, r, d, info = env.step(a)
@@ -362,14 +371,18 @@ def ppo(env_fn,
 
             # Track cumulative cost over training
             cum_cost += c
+            cum_reward += r
 
             ep_ret += r
             ep_len += 1
             ep_cost += c
 
             if agent.reward_penalized:
-                r_total = r - cur_penalty * c
-                r_total /= (1 + cur_penalty)
+                fix_penalty = 10
+                r_total = r - fix_penalty * c
+                r_total /= (1 + fix_penalty)
+                # r_total = r - cur_penalty * c
+                # r_total /= (1 + cur_penalty)
 
                 print("reward total: ", r_total)
                 # buf.store(o, a, r_total, v_t, 0, 0, logp_t, pi_info_t)
@@ -407,7 +420,21 @@ def ppo(env_fn,
                 if terminal:
                     # only save EpRet / EpLen if trajectory finished
                     # logger.store(EpRet=ep_ret, EpLen=ep_len)
+                    # print("terminal ep ret: ", ep_ret)
                     logger.store(EpRet=ep_ret, EpLen=ep_len, EpCost=ep_cost)
+
+                # average ep ret and cost
+                avg_ep_ret = ep_ret/ep_len
+                avg_ep_cost = ep_cost/ep_len
+
+                episode_metrics = {
+                    # 'epoch': epoch,
+                    'average ep ret': avg_ep_ret,
+                    'average ep cost' : avg_ep_cost
+                }
+
+                wandb.log(episode_metrics)
+
 
                 o, ep_ret, ep_len, ep_cost = env.reset(), 0, 0, 0
 
@@ -420,12 +447,18 @@ def ppo(env_fn,
 
         #  Cumulative cost calculations
         cumulative_cost = mpi_sum(cum_cost)
-        cost_rate = cumulative_cost / ((epoch + 1) * steps_per_epoch)
+        cumulative_reward = mpi_sum(cum_reward)
 
-        log_metrics = {'epoch': epoch,
+        cost_rate = cumulative_cost / ((epoch + 1) * steps_per_epoch)
+        reward_rate = cumulative_reward / ((epoch + 1) * steps_per_epoch)
+
+        log_metrics = {
+                       # 'epoch': epoch,
                        'value': v,
                        'cost rate': cost_rate,
-                       'cumulative cost': cumulative_cost,
+                       'reward rate' : reward_rate
+                       # 'cumulative cost': cumulative_cost,
+                       # 'cumulative reward': cumulative_reward,
                        }
 
         wandb.log(log_metrics)
@@ -451,71 +484,49 @@ def ppo(env_fn,
 
 if __name__ == '__main__':
     import argparse
+    from spinup_utils import setup_logger_kwargs
 
-    print("Testing experimental grid")
-    print(test_eg())
+    # print("Testing experimental grid")
+    # print(test_eg())
 
     parser = argparse.ArgumentParser()
     parser.add_argument('--env', type=str, default='Safexp-PointGoal1-v0')
+    parser.add_argument('--agent', type=str, default='ppo-lagrange')
     parser.add_argument('--hid', type=int, default=64)
     parser.add_argument('--l', type=int, default=2)
     parser.add_argument('--gamma', type=float, default=0.99)
-    parser.add_argument('--cost_gamma', type=float, default=0.99)
+    parser.add_argument('--cost_gamma', type=float, default=0.98)
     parser.add_argument('--seed', '-s', type=int, default=0)
     # parser.add_argument('--cpu', type=int, default=4)
-    parser.add_argument('--cpu', type=int, default=1)
+    parser.add_argument('--cpu', type=int, default=2)
     parser.add_argument('--steps', type=int, default=4000)
-    parser.add_argument('--epochs', type=int, default=50)
-    parser.add_argument('--cost_lim', type=float, default=10)
+    parser.add_argument('--epochs', type=int, default=500)
+    parser.add_argument('--cost_lim', type=float, default=25)
     parser.add_argument('--reward_penalized', action='store_true')
     parser.add_argument('--objective_penalized', action='store_true')
     parser.add_argument('--learn_penalty', action='store_true')
     parser.add_argument('--penalty_param_loss', action='store_true')
-    parser.add_argument('--exp_name', type=str, default='ppo_safe_50ep')
+    parser.add_argument('--exp_name', type=str, default='ppo_safe')
     args = parser.parse_args()
 
+    # print("cpu count", os.cpu_count())
     mpi_fork(args.cpu)  # run parallel code with mpi
 
-    # from spinup.utils.run_utils import setup_logger_kwargs
-    from spinup_utils import setup_logger_kwargs
+    # PROJECT_NAME = args.name
 
-    logger_kwargs = setup_logger_kwargs(args.exp_name, args.seed)
+    logger_kwargs = setup_logger_kwargs(PROJECT_NAME, args.seed)
 
-    print("Print environment features")
-    newenv = gym.make(args.env)
-    print("Number of hazards: ", newenv.hazards_num)
-    print("Hazard sizes: ", newenv.hazards_size)
-    print("Hazard locations: ", newenv.hazards_locations)
-    print("Hazards cost: ", newenv.hazards_cost)
-    print("Goal size: ", newenv.goal_size)
-    print("Goal placements: ", newenv.goal_placements)
-    print("Reward Goal: ", newenv.reward_goal)
-    print("Reward distance: ", newenv.reward_distance)
-    print("Constrain indicator: ", newenv.constrain_indicator)
-    print("Constrain hazards: ", newenv.constrain_hazards)
-
-    # 'robot_base': 'xmls/point.xml',
-    # 'robot_locations': [(0, 0)],
-    # 'robot_rot': 0,
+    # 'robot_base': 'xmls/point.xml', # 'robot_locations': [(0, 0)], # 'robot_rot': 0,
 
     # Prepare agent
-    agent_kwargs = dict(reward_penalized=args.reward_penalized,
-                        objective_penalized=args.objective_penalized,
-                        learn_penalty=args.learn_penalty,
-                        penalty_param_loss=args.penalty_param_loss)
-
     trpo_kwargs = dict(
-        reward_penalized=False,
-        objective_penalized=False,
-        learn_penalty=False,
-        penalty_param_loss=False  # Irrelevant in unconstrained
+        reward_penalized=False, objective_penalized=False,
+        learn_penalty=False, penalty_param_loss=False  # Irrelevant in unconstrained
     )
 
-    ppo_kwargs = dict(
-        reward_penalized=False,
-        objective_penalized=False,
-        learn_penalty=False,
-        penalty_param_loss=False  # Irrelevant in unconstrained
+    ppo_lagrange_kwargs = dict(
+        reward_penalized=False, objective_penalized=True,
+        learn_penalty=True, penalty_param_loss=True  # Irrelevant in unconstrained
     )
 
     cpo_kwargs = dict(
@@ -525,44 +536,46 @@ if __name__ == '__main__':
         penalty_param_loss=False  # Irrelevant in CPO
     )
 
+    # print("agent keyword args")
+    # print(agent_kwargs)
 
+    # Create agent
 
-    print("agent keyword args")
-    print(agent_kwargs)
+    if args.agent == 'ppo-lagrange':
+        agent = PPOAgent(**ppo_lagrange_kwargs)
+    elif args.agent == 'trpo':
+        agent = TRPOAgent(**trpo_kwargs)
+    elif args.agent == 'cpo':
+        agent = CPOAgent(**cpo_kwargs)
 
     # Run experiment
-    #     ppo(lambda: gym.make(args.env),
-    #         actor_critic=MLPActorCritic,
-    #         agent= PPOAgent(**agent_kwargs),
-    #         ac_kwargs=dict(hidden_sizes=[args.hid] * args.l),
-    #         gamma=args.gamma, seed=args.seed,
-    #         steps_per_epoch=args.steps,
-    #         epochs=args.epochs,
-    #         logger_kwargs=logger_kwargs)
+    # print("done with PPO, starting with CPO")
 
-    print("done with PPO, starting with CPO")
+    # print("modified environment ")
 
-    # if args.agent == 'ppo':
-    #     agent = PPOAgent(**agent_kwargs)
-    # elif args.agent == 'trpo':
-    #     agent = TRPOAgent(**agent_kwargs)
-    # elif args.agent == 'cpo':
-    #     agent = CPOAgent(**agent_kwargs)
+    print("Print environment features")
+    # newenv = gym.make(args.env)
+    # print("Number of hazards: ", mod_env.hazards_num)
+    # print("Hazard sizes: ", mod_env.hazards_size)
+    # print("Hazard locations: ", mod_env.hazards_locations)
+    # print("Hazards cost: ", mod_env.hazards_cost)
+    # print("Goal size: ", mod_env.goal_size)
+    # print("Goal placements: ", mod_env.goal_placements)
+    # print("Reward Goal: ", mod_env.reward_goal)
+    # print("Reward distance: ", mod_env.reward_distance)
+    # print("Constrain indicator: ", mod_env.constrain_indicator)
+    # print("Constrain hazards: ", mod_env.constrain_hazards)
 
     ppo(lambda: gym.make(args.env),
         actor_critic=MLPActorCritic,
-        agent=CPOAgent(**cpo_kwargs),
+        agent=agent,
         ac_kwargs=dict(hidden_sizes=[args.hid] * args.l),
         gamma=args.gamma, seed=args.seed,
         steps_per_epoch=args.steps,
         epochs=args.epochs,
         logger_kwargs=logger_kwargs)
 
-
 # all_args = parser.parse_args()
-
     wandb.config.update(args)
-
     wandb.finish()
-
 # reward function: r - penalty*cost

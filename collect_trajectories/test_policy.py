@@ -103,26 +103,18 @@ if __name__ == '__main__':
     import argparse
 
     parser = argparse.ArgumentParser()
-    parser.add_argument('--fpath', type=str, default= '/home/tyna/Documents/openai/research-project/data/ppo_test/ppo_test_s0/')
+    parser.add_argument('--fpath', type=str,
+                        default= '/home/tyna/Documents/openai/research-project/data/ppo_test/ppo_test_s0/')
     parser.add_argument('--len', '-l', type=int, default=0)
     parser.add_argument('--episodes', '-n', type=int, default=100)
     parser.add_argument('--norender', '-nr', action='store_true')
     # parser.add_argument('--itr', '-i', type=int, default=-1)
-    parser.add_argument('--itr', '-i', type=int, default=1)
+    parser.add_argument('--itr', '-i', type=int, default=-1)
     parser.add_argument('--deterministic', '-d', action='store_true')
     args = parser.parse_args()
 
-    # try to fix the below
-    # env, get_action = load_policy_and_env(args.fpath,
-    #                                       args.itr if args.itr >= 0 else 'last',
-    #                                       args.deterministic)
-    # print("environment")
-    # print(env)
-    # run_policy(env, get_action, args.len, args.episodes, not (args.norender))
-#
-# >>> from spinup.utils.test_policy import load_policy_and_env, run_policy
-# >>> import your_env
-_, get_action = load_policy_and_env(args.fpath,
+
+_, get_action = load_policy_and_env('/home/tyna/Documents/openai/research-project/data/ppo_500e_8hz_cost1_rew1_lim25/ppo_500e_8hz_cost1_rew1_lim25_s0/',
                                     args.itr if args.itr >= 0 else 'last',
                                     args.deterministic)
 
@@ -131,9 +123,6 @@ run_policy(env, get_action, args.len, args.episodes, not (args.norender))
 
 # import replay buffer object, populate with actions, rewards, dones, info
 # save it to a file, then you have a bunch of environment interactions from a given policy
-
-
-
 
 # store all intermediate action, data, similar to
 # >>> env = your_env.make()

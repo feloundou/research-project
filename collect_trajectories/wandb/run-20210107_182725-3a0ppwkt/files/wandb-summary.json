@@ -1,0 +1,1 @@
+{"average ep ret": 0.010921987750490098, "average ep cost": 0.112, "_step": 91, "_runtime": 122, "_timestamp": 1610062167, "value function loss": 0.20914781093597412, "policy loss": 0.0, "value": 1.5722073316574097, "cost rate": 0.10869565217391304, "reward rate": 0.004375814686650816}

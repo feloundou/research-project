@@ -474,9 +474,12 @@ if __name__ == '__main__':
     parser.add_argument('--continue_from_file', action='store_true')
     parser.add_argument('--save_every', type=int, default=5)
     parser.add_argument('--print_updates', action='store_false')
+    parser.add_argument('--cpu', type=int, default=1)
 
 
     args = parser.parse_args()
+
+    mpi_fork(args.cpu)  # run parallel code with mpi
 
 # Set environment and arguments
     env = gym.make(args.env_name)
