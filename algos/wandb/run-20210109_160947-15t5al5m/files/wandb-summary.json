@@ -1,0 +1,1 @@
+{"reward loss": 5.912780665084938e-08, "constraint loss": 5314.7900390625, "_step": 2, "_runtime": 10, "_timestamp": 1610226597, "step length": 0.81, "mean rewards": -0.33886533975601196, "mean costs": 34.20000076293945, "cum average rewards": -0.16943266987800598, "cum average costs": 17.100000381469727}
