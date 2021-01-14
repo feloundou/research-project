@@ -7,7 +7,7 @@ from spinup_utils import *
 import gym
 import safety_gym
 from safety_gym.envs.engine import Engine
-from test_policy import *
+from run_policy_sim_ppo import *
 
 import torch
 import torch.nn as nn

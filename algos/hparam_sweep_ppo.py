@@ -20,94 +20,98 @@ from agent_types import *
 
 import wandb
 # wandb.login()
-PROJECT_NAME = 'ppo-agent-bayes-small'
-wandb.init(project=PROJECT_NAME)
 
-from ppo_function_only import ppo
+# wandb.init(project=PROJECT_NAME)
 
-
-
+from run_ppo_agent import *
 
 # Experimentation
 # We have two experimentation options: Experiment Grid and wandb hyperparameter sweep
+#  128, 128, 128, 128
+
 hyperparameter_defaults = dict(
-    hid = 64,
-    l = 2,
+    # hid = 64,
+    # l = 2,
     gamma = 0.99,
     cost_gamma = 0.99,
     seed = 0,
     cost_lim = 10,
     steps = 4000,
     epochs = 50,
+    cpu=2
     )
 
 
 sweep_config = {
-  "name": "New Sweep",
+  "name": "Training Steps Sweep",
   # "method": "grid",  # think about switching to bayes
     "method": "bayes",
     "metric": {
-        "name": "value",
+        "name": "reward rate",
         "goal": "maximize"
     },
   "parameters": {
         "hid": {
-            "values": [64, 128]
+            "values": [128]
         },
         "l": {
-            "values" : [1, 2, 4]
+            "values" : [2, 4]
         },
+
         "gamma": {
-            # "values": [ 0.98, 0.985, 0.99, 0.995]
-            "min": 0.98,
-            "max": 0.995
+            "values" : [0.98, 0.985]
         },
-      "cost_gamma": {
-          # "values": [ 0.98, 0.985, 0.99, 0.995]
-          "min": 0.98,
-          "max": 0.995
+
+      "lam": {
+          "values": [0.97, 0.98]
       },
-        "seed": {
-            "values" : [0, 99, 999]
-        },
-        "cost_lim": {
-            "min" : 0,
-            "max" : 25
-        },
-        "epochs": {
-            "values" : [100, 500, 1000]
-        }
+    "steps": {
+          "values": [4000, 8000]
+      },
+        # "cost_gamma": {
+        #     "values" : [0.98, 0.985, 0.99, 0.995]
+        # },
+        # "cost_lim": {
+        #     "values" : [0, 10, 25, 40]
+        #     # "min" : 0,
+        #     # "max" : 25
+        # },
+      # "penalty_lr" : {
+      #     "min" : 5e-3,
+      #     "max" : 5e-2
+      # }
     }
 }
 
 exp_name = 'exp0'
+PROJECT_NAME = 'penalized-ppo-agent-sweep'
 
 def safe_ppo_train():
-    run = wandb.init(project="safe-ppo-agent", config=hyperparameter_defaults)
+    run = wandb.init(project=PROJECT_NAME, config=hyperparameter_defaults)
     # print("new seed: ", run.config.seed)
 
+    # mpi_fork(run.config.cpu)
     logger_kwargs = setup_logger_kwargs(exp_name, run.config.seed)
-
 
     ppo(lambda: gym.make('Safexp-PointGoal1-v0'),
         actor_critic=MLPActorCritic,
         agent=PPOAgent(),
         ac_kwargs=dict(hidden_sizes=[run.config.hid] * run.config.l),
         seed=0,
-        steps_per_epoch=4000,
+        steps_per_epoch=run.config.steps,
         epochs=run.config.epochs,
         max_ep_len=1000,
         # Discount factors:
         gamma=run.config.gamma,
-        lam=0.97,
-        cost_gamma=0.99,
+        lam=run.config.lam,
         cost_lam=0.97,
         # Policy Learning:
         ent_reg=0.,
         # Cost constraints / penalties:
-        cost_lim=25,
+        cost_lim=10,
         penalty_init=1.,
-        penalty_lr=5e-2,
+        # penalty_lr=run.config.penalty_lr,
+        penalty_lr=0.005,
         # KL divergence:
         target_kl=0.01,
         # Value learning:
@@ -119,12 +123,8 @@ def safe_ppo_train():
         # Clipping
         clip_ratio=0.2,
         logger_kwargs=logger_kwargs,
-        save_freq=10)
-
-
-
+        save_every=10)
     print("config:", dict(run.config))
-
 
 
 sweep_id = wandb.sweep(sweep_config, entity="feloundou", project=PROJECT_NAME)
@@ -132,14 +132,24 @@ wandb.agent(sweep_id, function= safe_ppo_train)
 
 wandb.finish()
 
+#
+# here are some okay params
+# penalty lr:  0.005
+# cost limit:  25
+# gamma:  0.99
+# cost gamma 0.99
+# seed:  0
 
-# # Experiment Grid
-# def test_eg():
-#     eg = ExperimentGrid()
-#     eg.add('test:a', [1, 2, 3], 'ta', True)
-#     eg.add('test:b', [1, 2, 3])
-#     eg.add('some', [4, 5])
-#     eg.add('why', [True, False])
-#     eg.add('huh', 5)
-#     eg.add('no', 6, in_name=True)
-#     return eg.variants()
+# Look at https://wandb.ai/feloundou/penalized-ppo-agent-sweep/sweeps/ikgcj25k/table?workspace=user-feloundou for some
+# promising setups.
+# scarlet-sweep in the training steps sweep is one of my guiding principles for now
+# penalty lr: 0.005
+# cost limit: 10
+# gamma: 0.985
+# lam : 0.98
+# seed : 0
+# training steps: 8000
+# layers: 128 x 2
+
+
+# cost gamma does not really do anything

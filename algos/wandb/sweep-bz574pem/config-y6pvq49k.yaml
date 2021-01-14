@@ -1,0 +1,10 @@
+wandb_version: 1
+
+cost_gamma:
+  value: 0.99
+gamma:
+  value: 0.98
+hid:
+  value: 64
+l:
+  value: 2

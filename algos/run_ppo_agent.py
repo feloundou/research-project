@@ -21,7 +21,7 @@ from agent_types import *
 import wandb
 wandb.login()
 
-PROJECT_NAME = 'ppo_penalized_500e'
+PROJECT_NAME = 'ppo_penalized_cyan_500ep_8000steps'
 # 4 million env interactions
 wandb.init(project="ppo-5000e-expts", name= PROJECT_NAME)
 
@@ -45,7 +45,7 @@ def ppo(env_fn,
         # Cost constraints / penalties:
         cost_lim=25,
         penalty_init=1.,
-        penalty_lr=5e-2,
+        penalty_lr=5e-3,
         # KL divergence:
         target_kl=0.01,
         # Value learning:
@@ -64,50 +64,6 @@ def ppo(env_fn,
         reward_goal = 1,
         save_every=10):
     """
-    Proximal Policy Optimization (by clipping),
-    with early stopping based on approximate KL
-    Args:
-        env_fn : A function which creates a copy of the environment.
-            The environment must satisfy the OpenAI Gym API.
-        actor_critic: The constructor method for a PyTorch Module with a
-            ``step`` method, an ``act`` method, a ``pi`` module, and a ``v``
-            module. The ``step`` method should accept a batch of observations
-            and return:
-            ===========  ================  ======================================
-            Symbol       Shape             Description
-            ===========  ================  ======================================
-            ``a``        (batch, act_dim)  | Numpy array of actions for each
-                                           | observation.
-            ``v``        (batch,)          | Numpy array of value estimates
-                                           | for the provided observations.
-            ``logp_a``   (batch,)          | Numpy array of log probs for the
-                                           | actions in ``a``.
-            ===========  ================  ======================================
-            The ``act`` method behaves the same as ``step`` but only returns ``a``.
-            The ``pi`` module's forward call should accept a batch of
-            observations and optionally a batch of actions, and return:
-            ===========  ================  ======================================
-            Symbol       Shape             Description
-            ===========  ================  ======================================
-            ``pi``       N/A               | Torch Distribution object, containing
-                                           | a batch of distributions describing
-                                           | the policy for the provided observations.
-            ``logp_a``   (batch,)          | Optional (only returned if batch of
-                                           | actions is given). Tensor containing
-                                           | the log probability, according to
-                                           | the policy, of the provided actions.
-                                           | If actions not given, will contain
-                                           | ``None``.
-            ===========  ================  ======================================
-            The ``v`` module's forward call should accept a batch of observations
-            and return:
-            ===========  ================  ======================================
-            Symbol       Shape             Description
-            ===========  ================  ======================================
-            ``v``        (batch,)          | Tensor containing the value estimates
-                                           | for the provided observations. (Critical:
-                                           | make sure to flatten this!)
-            ===========  ================  ======================================
         ac_kwargs (dict): Any kwargs appropriate for the ActorCritic object you provided to PPO.
         seed (int): Seed for random number generators.
         steps_per_epoch (int): Number of steps of interaction (state-action pairs)
@@ -128,8 +84,7 @@ def ppo(env_fn,
             to take fewer than this.)
         train_v_iters (int): Number of gradient descent steps to take on
             value function per epoch.
-        lam (float): Lambda for GAE-Lambda. (Always between 0 and 1,
-            close to 1.)
+        lam (float): Lambda for GAE-Lambda. (Always between 0 and 1, close to 1.)
         max_ep_len (int): Maximum length of trajectory / episode / rollout.
         target_kl (float): Roughly what KL divergence we think is appropriate
             between new and old policies after an update. This will get used
@@ -138,6 +93,14 @@ def ppo(env_fn,
         save_every (int): How often (in terms of gap between epochs) to save
             the current policy and value function.
     """
+
+    # Print some params
+    print("here are some params")
+    print("penalty lr: ", penalty_lr)
+    print("cost limit: ", cost_lim)
+    print("gamma: ", gamma)
+    print("cost gamma", cost_gamma)
+    print("seed: ", seed)
 
     # Special function to avoid certain slowdowns from PyTorch + MPI combo.
     setup_pytorch_for_mpi()
@@ -190,7 +153,7 @@ def ppo(env_fn,
     # Set up experience buffer
     local_steps_per_epoch = int(steps_per_epoch / num_procs())
     # buf = PPOBuffer(obs_dim, act_dim, local_steps_per_epoch, gamma, lam)
-    buf = CostPOBuffer(obs_dim, act_dim, local_steps_per_epoch, gamma, lam)
+    buf = CostPOBuffer(obs_dim, act_dim, local_steps_per_epoch, gamma, lam, cost_gamma, cost_lam)
 
     # # Penalty
     # if agent.learn_penalty:
@@ -205,6 +168,9 @@ def ppo(env_fn,
     vf_optimizer = Adam(ac.v.parameters(), lr=vf_lr)
 
     penalty = np.log(max(np.exp(penalty_init)-1, 1e-8))
+
+    mov_avg_ret = 0
+    mov_avg_cost = 0
 
     # Set up function for computing PPO policy loss
     def compute_loss_pi(data):
@@ -233,10 +199,10 @@ def ppo(env_fn,
         # print("value tensor: ", ac.v(obs))
         return v_loss
 
-    def compute_loss_vc(data):
-        obs, ret, cret = data['obs'], data['ret'], data['cret']
-        vc_loss = ((ac.vc(obs) - cret) ** 2).mean()
-        return vc_loss
+    # def compute_loss_vc(data):
+    #     obs, ret, cret = data['obs'], data['ret'], data['cret']
+    #     vc_loss = ((ac.vc(obs) - cret) ** 2).mean()
+    #     return vc_loss
 
 
     # Set up model saving
@@ -248,6 +214,21 @@ def ppo(env_fn,
         # print("Starting update")
 
         cur_cost = logger.get_stats('EpCost')[0]
+        cur_rew = logger.get_stats('EpRet')[0]
+
+        if len(rew_mov_avg_10) >= 10:
+            # print("rew moving average")
+            # print(rew_mov_avg_10)
+            rew_mov_avg_10.pop(0)
+            cost_mov_avg_10.pop(0)
+            # print(rew_mov_avg_10)
+
+        rew_mov_avg_10.append(cur_rew)
+        cost_mov_avg_10.append(cur_cost)
+
+        mov_avg_ret  = np.mean(rew_mov_avg_10)
+        mov_avg_cost = np.mean(cost_mov_avg_10)
+
         c = cur_cost - cost_lim
 
         if c > 0 and agent.cares_about_cost:
@@ -264,7 +245,7 @@ def ppo(env_fn,
         pi_l_old, pi_info_old = compute_loss_pi(data)
         pi_l_old = pi_l_old.item()
         v_l_old = compute_loss_v(data).item()
-        vc_l_old = compute_loss_vc(data).item()
+        # vc_l_old = compute_loss_vc(data).item()
 
 
         # Train policy with multiple steps of gradient descent
@@ -293,10 +274,11 @@ def ppo(env_fn,
 
         # Penalty update
 
+        print("old penalty: ", cur_penalty)
         cur_penalty = max(0, cur_penalty + penalty_lr*(cur_cost - cost_lim))
         print("new penalty: ", cur_penalty)
-        print("current cost: ", cur_cost)
-        print("cost limit: ", cost_lim)
+        # print("current cost: ", cur_cost)
+        # print("cost limit: ", cost_lim)
 
         # Log changes from update
         kl, ent, cf = pi_info['kl'], pi_info_old['ent'], pi_info['cf']
@@ -308,7 +290,8 @@ def ppo(env_fn,
         vf_loss_avg = mpi_avg(v_l_old)
         pi_loss_avg = mpi_avg(pi_l_old)
 
-        update_metrics = {
+        update_metrics = {'10p mov avg ret' : mov_avg_ret,
+                          '10p mov avg cost' : mov_avg_cost ,
                         'value function loss': vf_loss_avg,
                           # 'loss vc': vc_l_old,
                           'policy loss': pi_loss_avg,
@@ -317,12 +300,14 @@ def ppo(env_fn,
                           }
 
         wandb.log(update_metrics)
+        return(cur_penalty)
 
     # Prepare for interaction with environment
     start_time = time.time()
     # o, ep_ret, ep_len = env.reset(), 0, 0
     o, r, d, c, ep_ret, ep_cost, ep_len, cum_cost, cum_reward = env.reset(), 0, False, 0, 0, 0, 0, 0, 0
-
+    rew_mov_avg_10 = []
+    cost_mov_avg_10 = []
 
     cur_penalty = penalty_init_param
 
@@ -399,17 +384,17 @@ def ppo(env_fn,
                     print("end of episode return: ", ep_ret)
                     logger.store(EpRet=ep_ret, EpLen=ep_len, EpCost=ep_cost)
 
-                # average ep ret and cost
-                avg_ep_ret = ep_ret/ep_len
-                avg_ep_cost = ep_cost/ep_len
+                    # average ep ret and cost
+                    avg_ep_ret = ep_ret
+                    avg_ep_cost = ep_cost
 
-                episode_metrics = {
-                    # 'epoch': epoch,
-                    'average ep ret': avg_ep_ret,
-                    'average ep cost' : avg_ep_cost
-                }
+                    episode_metrics = {
+                        # 'epoch': epoch,
+                        'average ep ret': avg_ep_ret,
+                        'average ep cost' : avg_ep_cost
+                    }
 
-                wandb.log(episode_metrics)
+                    wandb.log(episode_metrics)
 
                 # o, ep_ret, ep_len, ep_cost = env.reset(), 0, 0, 0
                 # Reset environment
@@ -420,11 +405,12 @@ def ppo(env_fn,
             logger.save_state({'env': env}, None)
 
         # Perform PPO update!
-        update(cur_penalty)
+        cur_penalty = update(cur_penalty)
 
         #  Cumulative cost calculations
         cumulative_cost = mpi_sum(cum_cost)
         cumulative_reward = mpi_sum(cum_reward)
+
 
 
         cost_rate = cumulative_cost / ((epoch + 1) * steps_per_epoch)
@@ -432,7 +418,7 @@ def ppo(env_fn,
 
         log_metrics = {
                        # 'epoch': epoch,
-                       'value': v,
+                       # 'value': v,
                        'cost rate': cost_rate,
                        'reward rate' : reward_rate
                        # 'cumulative cost': cumulative_cost,
@@ -440,6 +426,8 @@ def ppo(env_fn,
                        }
 
         wandb.log(log_metrics)
+
+        # wandb.log(update_metrics, episode_metrics, log_metrics)
 
         # Log info about epoch
         logger.log_tabular('Epoch', epoch)
@@ -464,8 +452,6 @@ if __name__ == '__main__':
     import argparse
     from spinup_utils import setup_logger_kwargs
 
-    # print("Testing experimental grid")
-    # print(test_eg())
 
     parser = argparse.ArgumentParser()
     parser.add_argument('--env', type=str, default='Safexp-PointGoal1-v0')
@@ -473,13 +459,15 @@ if __name__ == '__main__':
     parser.add_argument('--hid', type=int, default=64)
     parser.add_argument('--l', type=int, default=2)
     parser.add_argument('--gamma', type=float, default=0.99)
-    parser.add_argument('--cost_gamma', type=float, default=0.98)
+    parser.add_argument('--cost_gamma', type=float, default=0.99)
     parser.add_argument('--seed', '-s', type=int, default=0)
     # parser.add_argument('--cpu', type=int, default=4)
     parser.add_argument('--cpu', type=int, default=2)
-    parser.add_argument('--steps', type=int, default=4000)
+    parser.add_argument('--steps', type=int, default=8000)
     parser.add_argument('--epochs', type=int, default=500)
     parser.add_argument('--cost_lim', type=float, default=25)
+    # parser.add_argument('--penalty_lr', type=float, default=0.04)
+    parser.add_argument('--penalty_lr', type=float, default=0.005)
     parser.add_argument('--reward_penalized', action='store_true')
     parser.add_argument('--objective_penalized', action='store_true')
     parser.add_argument('--learn_penalty', action='store_true')
@@ -495,11 +483,6 @@ if __name__ == '__main__':
     logger_kwargs = setup_logger_kwargs(PROJECT_NAME, args.seed)
 
     # Prepare agent
-    trpo_kwargs = dict(
-        reward_penalized=False, objective_penalized=False,
-        learn_penalty=False, penalty_param_loss=False  # Irrelevant in unconstrained
-    )
-
     ppo_lagrange_kwargs = dict(
         reward_penalized=False, objective_penalized=True,
         learn_penalty=True, penalty_param_loss=True  # Irrelevant in unconstrained
@@ -513,27 +496,64 @@ if __name__ == '__main__':
     )
 
     # Create agent
-
     if args.agent == 'ppo-lagrange':
         agent = PPOAgent(**ppo_lagrange_kwargs)
-    elif args.agent == 'trpo':
-        agent = TRPOAgent(**trpo_kwargs)
     elif args.agent == 'cpo':
         agent = CPOAgent(**cpo_kwargs)
 
+    scarlet_settings = dict(penalty_lr=0.025,
+                            cost_lim=25,
+                            gamma=0.985,
+                            lam=0.98,
+                            seed=0,
+                            steps=8000,
+                            hid=128,
+                            l=2)
+
+    lemon_settings = dict(penalty_lr=0.025,
+                            cost_lim=25,
+                            gamma=0.99,
+                            lam=0.98,
+                            seed=0,
+                            steps=8000,
+                            hid=128,
+                            l=2)
+
+    ### cyan
+    cyan_settings = dict(penalty_lr=0.025,
+                          cost_lim=25,
+                          gamma=0.99,
+                          lam=0.98,
+                          seed=0,
+                          steps=8000,
+                          hid=128,
+                          l=4)
+
+    ### navy
+    navy_settings = dict(penalty_lr=0.025,
+                         cost_lim=25,
+                         gamma=0.99,
+                         lam=0.97,
+                         seed=0,
+                         steps=8000,
+                         hid=128,
+                         l=4)
+
+
     # Run experiment
-    # print("done with PPO, starting with CPO")
 
     ppo(lambda: gym.make(args.env),
         actor_critic=MLPActorCritic,
         agent=agent,
-        ac_kwargs=dict(hidden_sizes=[args.hid] * args.l),
-        gamma=args.gamma,
+        ac_kwargs=dict(hidden_sizes=[cyan_settings['hid']] * cyan_settings['l']),
+        gamma=cyan_settings['gamma'],
+        lam = cyan_settings['lam'],
         cost_gamma = args.cost_gamma,
-        seed=args.seed,
-        steps_per_epoch=args.steps,
+        seed=cyan_settings['seed'],
+        steps_per_epoch=cyan_settings['steps'],
         epochs=args.epochs,
-        cost_lim= args.cost_lim,
+        cost_lim= cyan_settings['cost_lim'],
+        penalty_lr=cyan_settings['penalty_lr'],
         logger_kwargs=logger_kwargs)
 
 # all_args = parser.parse_args()

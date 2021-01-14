@@ -1254,13 +1254,7 @@ class CostPOBuffer:
         assert self.ptr == self.max_size    # buffer has to be full before you can get
         self.ptr, self.path_start_idx = 0, 0
 
-        # # Advantage normalizing trick for policy gradient
-        # adv_mean, adv_std = mpi_statistics_scalar(self.adv_buf)
-        # self.adv_buf = (self.adv_buf - adv_mean) / (adv_std + EPS)
-        #
-        # # Center, but do NOT rescale advantages for cost gradient
-        # cadv_mean, _ = mpi_statistics_scalar(self.cadv_buf)
-        # self.cadv_buf -= cadv_mean
+
 
         # the next two lines implement the advantage normalization trick
         adv_mean, adv_std = mpi_statistics_scalar(self.adv_buf)
