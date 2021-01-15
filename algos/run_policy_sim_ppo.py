@@ -6,7 +6,9 @@ import torch
 from spinup_utils import *
 import gym
 import safety_gym
-from safety_gym.envs.engine import Engine
+import pandas as pd
+from random import randint
+# from safety_gym.envs.engine import Engine
 
 
 def load_policy_and_env(fpath, itr='last', deterministic=False):
@@ -40,11 +42,9 @@ def load_policy_and_env(fpath, itr='last', deterministic=False):
     # try to load environment from save
     # (sometimes this will fail because the environment could not be pickled)
     try:
-        print("path")
+
         print(osp.join(fpath, 'vars' + itr + '.pkl'))
         state = joblib.load(osp.join(fpath, 'vars' + itr + '.pkl'))
-        print("test1")
-        print(state)
         env = state['env']
     except:
         env = None
@@ -76,7 +76,7 @@ def load_pytorch_policy(fpath, itr, deterministic=False):
     return get_action
 
 
-def run_policy(env, get_action, max_ep_len=None, num_episodes=100, render=True):
+def run_policy(env, get_action, max_ep_len=None, num_episodes=100, render=True, record=False, data_path=''):
     assert env is not None, \
         "Environment not found!\n\n It looks like the environment wasn't saved, " + \
         "and we can't run the agent in it. :( \n\n Check out the readthedocs " + \
@@ -84,20 +84,46 @@ def run_policy(env, get_action, max_ep_len=None, num_episodes=100, render=True):
 
     logger = EpochLogger()
     o, r, d, ep_ret, ep_len, n = env.reset(), 0, False, 0, 0, 0
+    ep_cost = 0
+    if record:
+        columns = ['observation', 'action', 'reward', 'cost', 'done']
+        sim_data = pd.DataFrame(index=[0], columns=columns)
+
     while n < num_episodes:
         if render:
             env.render()
             time.sleep(1e-3)
 
         a = get_action(o)
-        o, r, d, _ = env.step(a)
+        o, r, d, info = env.step(a)
+        if record:
+            iteration = dict(observation= [o], action=[a], reward=r, cost = info['cost'], done=d)
+
+            df = pd.DataFrame.from_dict(iteration)
+            sim_data = sim_data.append(df)
+
+
+        # print("obs")
+        # print("info:", info['cost'])
         ep_ret += r
         ep_len += 1
+        ep_cost += info['cost']
 
         if d or (ep_len == max_ep_len):
+            # finish recording and save csv
+            if record:
+                # drop first row (NAs) then save and reset
+                sim_data = sim_data[1:]
+                sname = data_path + 'cyan_episodes/sim_data_' +  str(randint(0, 100000)) + '.csv'
+                sname_pk = data_path + 'cyan_episodes/sim_data_' + str(randint(0, 100000)) + '.pkl'
+                # sim_data.to_csv(sname, index=False)
+                sim_data.to_pickle(sname_pk)
+                print(sname)
+                sim_data = pd.DataFrame(index=[0], columns=columns)
+
             logger.store(EpRet=ep_ret, EpLen=ep_len)
-            print('Episode %d \t EpRet %.3f \t EpLen %d' % (n, ep_ret, ep_len))
-            o, r, d, ep_ret, ep_len = env.reset(), 0, False, 0, 0
+            print('Episode %d \t EpRet %.3f \t EpLen %d \t EpCost %d' % (n, ep_ret, ep_len, ep_cost))
+            o, r, d, ep_ret, ep_len, ep_cost = env.reset(), 0, False, 0, 0, 0
             n += 1
 
     logger.log_tabular('EpRet', with_min_and_max=True)
@@ -122,14 +148,16 @@ if __name__ == '__main__':
     # the safe trained file is ppo_500e_8hz_cost5_rew1_lim25
 
     # file_name = 'ppo_500e_8hz_cost5_rew1_lim25'
-    # file_name = 'ppo_test'
-    # file_name = 'ppo_penalized_test'  #pretty good also
+    # file_name = 'ppo_penalized_test'  # second best
+    # file_name = 'ppo_penalized_cyan_500ep_8000steps'   # best so far
+    # file_name = 'cpo_500e_8hz_cost1_rew1_lim25'  # unconstrained
+
     # file_name = 'ppo_penalized_500e'
     # file_name = 'ppo_penalized_scarlet_500ep_8000steps_v2'
     # file_name = 'ppo_5000e_8hz_cost1_rew1_lim25'
     # file_name = 'ppo_penalized_lemon_500ep_8000steps'
-    file_name = 'ppo_penalized_cyan_500ep_8000steps'   # best so far
-    # file_name = 'cpo_500e_8hz_cost1_rew1_lim25'  # unconstrained
+
+
     base_path = '/home/tyna/Documents/openai/research-project/data/'
 
 
@@ -139,7 +167,9 @@ if __name__ == '__main__':
                                         args.deterministic)
 
     env = gym.make('Safexp-PointGoal1-v0')
-    run_policy(env, get_action, args.len, args.episodes, not (args.norender))
+    run_policy(env, get_action, args.len, args.episodes, not (args.norender), record=False, data_path=base_path)
+
+    # run_policy(env, get_action, args.len, args.episodes, False, record=True, data_path=base_path)
 
 
 
