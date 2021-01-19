@@ -1,1 +1,0 @@
-{"value function loss": 0.12450235337018967, "policy loss": -2.1792948246002197e-07, "_step": 1999, "_runtime": 5333, "_timestamp": 1610055207, "epoch": 999, "value": 1.6239773035049438, "cost rate": 0.06406475, "cumulative cost": 256259.0, "cumulative reward": 79487.625}
