@@ -1,0 +1,40 @@
+wandb_version: 1
+
+_wandb:
+  desc: null
+  value:
+    cli_version: 0.10.12
+    framework: torch
+    is_jupyter_run: false
+    is_kaggle_kernel: false
+    python_version: 3.8.5
+cost_gamma:
+  desc: null
+  value: 0.99
+cost_lim:
+  desc: null
+  value: 10
+epochs:
+  desc: null
+  value: 50
+gamma:
+  desc: null
+  value: 0.99
+hid:
+  desc: null
+  value: 64
+hidden_layer_size:
+  desc: null
+  value: 64
+l:
+  desc: null
+  value: 2
+seed:
+  desc: null
+  value: 0
+steps:
+  desc: null
+  value: 4000
+steps_per_epoch:
+  desc: null
+  value: 4000

@@ -1,0 +1,25 @@
+wandb_version: 1
+
+_wandb:
+  desc: null
+  value:
+    cli_version: 0.10.12
+    framework: torch
+    is_jupyter_run: false
+    is_kaggle_kernel: false
+    python_version: 3.8.5
+cost_lim:
+  desc: null
+  value: 25
+hid:
+  desc: null
+  value: 128
+l:
+  desc: null
+  value: 1
+penalty_lr:
+  desc: null
+  value: 0.01611735640286061
+seed:
+  desc: null
+  value: 999

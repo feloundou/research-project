@@ -1,0 +1,12 @@
+wandb_version: 1
+
+cost_lim:
+  value: 10
+hid:
+  value: 64
+l:
+  value: 2
+penalty_lr:
+  value: 0.02121895897211968
+seed:
+  value: 99

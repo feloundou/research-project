@@ -1,0 +1,10 @@
+wandb_version: 1
+
+hid:
+  value: 64
+l:
+  value: 4
+penalty_lr:
+  value: 0.042467114784429216
+seed:
+  value: 0

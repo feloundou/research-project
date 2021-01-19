@@ -1,0 +1,10 @@
+wandb_version: 1
+
+cost_gamma:
+  value: 0.9845996930545194
+cost_lim:
+  value: 5
+gamma:
+  value: 0.9926444699219634
+optim_mode:
+  value: adam

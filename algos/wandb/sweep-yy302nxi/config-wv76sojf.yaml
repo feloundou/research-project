@@ -1,0 +1,12 @@
+wandb_version: 1
+
+epochs:
+  value: 50
+gamma:
+  value: 0.98
+hid:
+  value: 64
+l:
+  value: 1
+seed:
+  value: 456

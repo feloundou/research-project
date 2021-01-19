@@ -1,0 +1,79 @@
+wandb_version: 1
+
+_wandb:
+  desc: null
+  value:
+    cli_version: 0.10.12
+    framework: torch
+    is_jupyter_run: false
+    is_kaggle_kernel: false
+    python_version: 3.8.5
+cf_lr:
+  desc: null
+  value: 0.01
+cg_damping:
+  desc: null
+  value: 0.001
+cg_max_iters:
+  desc: null
+  value: 10
+continue_from_file:
+  desc: null
+  value: false
+cost_gamma:
+  desc: null
+  value: 0.9906257670285165
+cost_l2_reg:
+  desc: null
+  value: 0.001
+cost_lim:
+  desc: null
+  value: 20
+env_name:
+  desc: null
+  value: Safexp-PointGoal1-v0
+epochs:
+  desc: null
+  value: 50
+gamma:
+  desc: null
+  value: 0.9910748955464416
+line_search_accept_ratio:
+  desc: null
+  value: 0.1
+line_search_coef:
+  desc: null
+  value: 0.9
+line_search_max_iter:
+  desc: null
+  value: 10
+model_name:
+  desc: null
+  value: null
+optim_max_iter:
+  desc: null
+  value: 25
+optim_mode:
+  desc: null
+  value: adam
+save_every:
+  desc: null
+  value: 5
+seed:
+  desc: null
+  value: 0
+target_kl:
+  desc: null
+  value: 0.01
+train_c_iters:
+  desc: null
+  value: 10
+train_v_iters:
+  desc: null
+  value: 10
+val_l2_reg:
+  desc: null
+  value: 0.001
+vf_lr:
+  desc: null
+  value: 0.01

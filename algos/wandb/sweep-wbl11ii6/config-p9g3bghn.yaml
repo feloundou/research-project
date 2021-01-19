@@ -1,0 +1,10 @@
+wandb_version: 1
+
+gamma:
+  value: 0.985
+hid:
+  value: 128
+l:
+  value: 1
+lam:
+  value: 0.995

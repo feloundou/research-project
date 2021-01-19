@@ -1,0 +1,12 @@
+wandb_version: 1
+
+gamma:
+  value: 0.98
+hid:
+  value: 128
+l:
+  value: 2
+lam:
+  value: 0.97
+steps:
+  value: 8000

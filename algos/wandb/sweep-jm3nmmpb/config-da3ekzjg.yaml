@@ -1,0 +1,16 @@
+wandb_version: 1
+
+cost_gamma:
+  value: 0.9852694427686489
+cost_lim:
+  value: 20
+epochs:
+  value: 5000
+gamma:
+  value: 0.9927655892092918
+hid:
+  value: 64
+l:
+  value: 2
+seed:
+  value: 123
