@@ -149,7 +149,7 @@ if __name__ == '__main__':
 
     # file_name = 'ppo_500e_8hz_cost5_rew1_lim25'
     # file_name = 'ppo_penalized_test'  # second best
-    # file_name = 'ppo_penalized_cyan_500ep_8000steps'   # best so far
+    file_name = 'ppo_penalized_cyan_500ep_8000steps'   # best so far
     # file_name = 'cpo_500e_8hz_cost1_rew1_lim25'  # unconstrained
 
     # file_name = 'ppo_penalized_500e'

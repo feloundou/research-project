@@ -10,9 +10,6 @@ from torch.utils.data import Dataset, DataLoader
 from torch.distributions import Normal
 import torch.optim as optim
 
-
-
-
 from adabelief_pytorch import AdaBelief
 from ppo_algos import *
 
@@ -55,7 +52,7 @@ class expert_demos(Dataset):
     def __init__(self, demos):
         self.data = []
         for i, row in enumerate(demos.values):
-            state, action, reward, cost, done  = row
+            state, action, reward, cost, done = row
             self.data.append((state, action, reward, cost, done))
             # print("here is the data")
         print("first action")
@@ -71,9 +68,6 @@ class expert_demos(Dataset):
 dataset = expert_demos(fil)
 
 loader = DataLoader(dataset, batch_size=32, shuffle=True, num_workers=2)
-
-# ac_kwargs=dict(hidden_sizes=[128] * 4)
-# ac = MLPActorCritic(env.observation_space, env.action_space, **ac_kwargs)
 
 pi = policy(env.observation_space.shape[0], 32, env.action_space.shape[0])
 pi_optimizer = Adam(pi.parameters(), lr=3e-4, weight_decay=0.0001)
@@ -101,7 +95,7 @@ for epoch in range(100):
 RENDER = True
 
 max_steps = 1000
-pi
+# pi
 returns = []
 for i in range(10):
     print('iter', i)
