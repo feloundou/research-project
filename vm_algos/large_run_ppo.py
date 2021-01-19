@@ -358,21 +358,6 @@ if __name__ == "__main__":
   # PROJECT_NAME = args.name
   logger_kwargs = setup_logger_kwargs(RUN_NAME, 0)
 
-  cyan_config = dict(penalty_lr=0.025,
-                     cost_lim=25,
-                     gamma=0.99,
-                     lam=0.98,
-                     seed=0,
-                     steps=20000,
-                     hid=128,
-                     l=4)
-
-  rose_config = dict(penalty_lr=0.025, cost_lim=0, gamma=0.99, lam=0.98, seed=0, steps=20000, hid=128, l=4)
-
-  hyacinth_config = dict(penalty_lr=0.025, cost_lim=10, gamma=0.99, lam=0.98, seed=0, steps=20000, hid=128, l=4) 
-
-  violet_config = dict(penalty_lr=0.025, cost_lim=0, gamma=0.999, lam=0.98, seed=0, steps=20000, hid=128, l=4)
-
   # Run experiment
   ppo(lambda: gym.make('Safexp-PointGoal1-v0'),
       actor_critic=MLPActorCritic,
