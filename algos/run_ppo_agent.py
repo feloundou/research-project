@@ -13,11 +13,7 @@ from ppo_algos import *
 from agent_types import *
 
 import wandb
-wandb.login()
 
-PROJECT_NAME = 'ppo_penalized_navy_500ep_8000steps'
-# 4 million env interactions
-wandb.init(project="ppo-5000e-expts", name=PROJECT_NAME)
 
 # Define PPO functions
 def ppo(env_fn,
@@ -52,10 +48,7 @@ def ppo(env_fn,
         clip_ratio=0.2,
         logger_kwargs=dict(),
         # Experimenting
-        modify_env=True,
-        constrain_mode=True,
-        hazards_cost=1,
-        reward_goal=1,
+        config_name = 'standard',
         save_every=10):
     """
         ac_kwargs (dict): Any kwargs appropriate for the ActorCritic object you provided to PPO.
@@ -96,6 +89,19 @@ def ppo(env_fn,
     print("cost gamma", cost_gamma)
     print("seed: ", seed)
 
+    # W&B Logging
+    wandb.login()
+
+    # print(ac_kwargs['hidden_sizes'][0])
+    # print(len(ac_kwargs['hidden_sizes']))
+
+    composite_name = 'ppo_penalized_' + config_name + '_' + str(int(steps_per_epoch/1000)) + 'Ks_' + str(epochs) + 'e_' + str(ac_kwargs['hidden_sizes'][0]) + 'x' + str(len(ac_kwargs['hidden_sizes']))
+    print(composite_name)
+
+    PROJECT_NAME = composite_name
+    # 4 million env interactions
+    wandb.init(project="ppo-experts-1000epochs", name=PROJECT_NAME)
+
     # Special function to avoid certain slowdowns from PyTorch + MPI combo.
     setup_pytorch_for_mpi()
 
@@ -110,23 +116,17 @@ def ppo(env_fn,
 
     # Instantiate environment
     env = env_fn()
-    # env.hazards_cost = 3
-    # if modify_env == True:
-    #     env.hazards_cost = hazards_cost
-    #     env.reward_goal = reward_goal
-    #
-    #     if constrain_mode == False:
-    #         env.constrain_hazards  =  False
+
     print("constraints in the environment")
     print("constrain hazards: ", env.constrain_hazards)
     print("hazards cost: ", env.hazards_cost)
+
     obs_dim = env.observation_space.shape
     act_dim = env.action_space.shape
 
     # Create actor-critic module and monitor it
     ac = actor_critic(env.observation_space, env.action_space, **ac_kwargs)
     # wandb.watch(ac)
-
 
     # Sync params across processes
     sync_params(ac)
@@ -145,14 +145,6 @@ def ppo(env_fn,
     local_steps_per_epoch = int(steps_per_epoch / num_procs())
     # buf = PPOBuffer(obs_dim, act_dim, local_steps_per_epoch, gamma, lam)
     buf = CostPOBuffer(obs_dim, act_dim, local_steps_per_epoch, gamma, lam, cost_gamma, cost_lam)
-
-    # # Penalty
-    # if agent.learn_penalty:
-    #     if agent.penalty_param_loss:
-    #         penalty_loss = -penalty_param * (cur_cost_ph - cost_lim)
-    #     else:
-    #         penalty_loss = -penalty * (cur_cost_ph - cost_lim)
-    #     train_penalty = MpiAdamOptimizer(learning_rate=penalty_lr).minimize(penalty_loss)
 
     # Set up optimizers for policy and value function
     pi_optimizer = Adam(ac.pi.parameters(), lr=pi_lr)
@@ -217,6 +209,7 @@ def ppo(env_fn,
         print("current cost: ", cur_cost)
 
         data = buf.get()
+
 
         pi_l_old, pi_info_old = compute_loss_pi(data)
         pi_l_old = pi_l_old.item()
@@ -300,12 +293,11 @@ def ppo(env_fn,
             r_total = r - cur_penalty * c
             r_total /= (1 + cur_penalty)
 
-            # print("naked rewards:", r)
-            # print("penalized rewards:", r_total)
-
-            # print("reward total: ", r_total)
+             # print("reward total: ", r_total)
             # buf.store(o, a, r_total, v_t, 0, 0, logp_t, pi_info_t)
             buf.store(o, a, r_total, v, 0, 0, logp, info)
+            # print("buffer")
+            # print(buf)
             # else:
             #     buf.store(o, a, r, v, c, vc, logp, info)
 
@@ -327,15 +319,10 @@ def ppo(env_fn,
                     _, v, _, _ = ac.step(torch.as_tensor(o, dtype=torch.float32))
                     last_v = v
                     last_vc = 0
-                    # if agent.reward_penalized:
-                    #     last_vc = 0
-                    # else:
-                    #     last_vc = vc
+
                 else:
                     last_v = 0
                 buf.finish_path(last_v, last_vc)
-
-                # sess.run looks like ac.step
 
                 if terminal:
                     # only save EpRet / EpLen if trajectory finished
@@ -409,12 +396,8 @@ def main(config):
     parser.add_argument('--epochs', type=int, default=50)
     parser.add_argument('--cost_lim', type=float, default=25)
     # parser.add_argument('--penalty_lr', type=float, default=0.04)
+    parser.add_argument('--config_name', type=str, default='standard')
     parser.add_argument('--penalty_lr', type=float, default=0.005)
-    parser.add_argument('--reward_penalized', action='store_true')
-    parser.add_argument('--objective_penalized', action='store_true')
-    parser.add_argument('--learn_penalty', action='store_true')
-    parser.add_argument('--penalty_param_loss', action='store_true')
-    parser.add_argument('--hazards_cost', type=int, default=1)
     parser.add_argument('--exp_name', type=str, default='ppo_safe')
 
     args = parser.parse_args()
@@ -422,10 +405,13 @@ def main(config):
     mpi_fork(args.cpu)  # run parallel code with mpi
 
     # PROJECT_NAME = args.name
-    logger_kwargs = setup_logger_kwargs(PROJECT_NAME, args.seed)
+    composite_name = 'ppo_penalized_' + config['name'] + '_' + str(int(args.steps / 1000)) + 'Ks_' + str(
+        args.epochs) + 'e_' + str(args.hid) + 'x' + str(args.l)
 
-    # Create agent
-    # agent = PPOAgent(**ppo_lagrange_kwargs)
+    print("composite name 2")
+    print(composite_name)
+
+    logger_kwargs = setup_logger_kwargs(composite_name, args.seed)
 
     # Run experiment
     ppo(lambda: gym.make(args.env),
@@ -440,6 +426,7 @@ def main(config):
         epochs=args.epochs,
         cost_lim= config['cost_lim'],
         penalty_lr=config['penalty_lr'],
+        config_name= config['name'],
         logger_kwargs=logger_kwargs)
 
     wandb.config.update(args)
@@ -449,7 +436,7 @@ if __name__ == '__main__':
 
     exec(open('nn_config.py').read())
 
-    main(cyan_config)
+    main(peony_config)
 
 
 # keep cost limits below 60-80

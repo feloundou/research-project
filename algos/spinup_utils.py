@@ -1090,13 +1090,6 @@ class PPOBuffer:
         self.ptr, self.path_start_idx, self.max_size = 0, 0, size
 
 
-        # self.rb = ReplayBuffer(size,
-        #                   env_dict={"obs": {"shape": obs_dim},
-        #                             "act": {"shape": act_dim},
-        #                             "rew": {}, "next_obs": {"shape": obs_dim}, "done": {}
-        #                             }
-        #                        )
-
     # def store(self, obs, act, rew, val, cost, cval, logp, done, next_obs):
     def store(self, obs, act, rew, val, cost, cval, logp, next_obs):
         """
@@ -1259,25 +1252,17 @@ class CostPOBuffer:
         assert self.ptr == self.max_size    # buffer has to be full before you can get
         self.ptr, self.path_start_idx = 0, 0
 
-
-
         # the next two lines implement the advantage normalization trick
         adv_mean, adv_std = mpi_statistics_scalar(self.adv_buf)
         self.adv_buf = (self.adv_buf - adv_mean) / adv_std
-        # data = dict(obs=self.obs_buf, act=self.act_buf, ret=self.ret_buf,
-        #             adv=self.adv_buf, logp=self.logp_buf)
-        # return {k: torch.as_tensor(v, dtype=torch.float32) for k, v in data.items()}
-
         data = dict(obs=self.obs_buf, act=self.act_buf, ret=self.ret_buf,
                     adv=self.adv_buf, logp=self.logp_buf, cadv=self.cadv_buf,
                     cret=self.cret_buf)
 
         return {k: torch.as_tensor(v, dtype=torch.float32) for k, v in data.items()}
 
-        # return [self.obs_buf, self.act_buf, self.adv_buf,
-        #         self.cadv_buf, self.ret_buf, self.cret_buf,
-        #         self.logp_buf] \
-        #        # + values_as_sorted_list(self.pi_info_bufs)
+    # def sample(self, *args, **kwargs):
+    #     return self.buffer.sample(*args, **kwargs)
 
 
 
