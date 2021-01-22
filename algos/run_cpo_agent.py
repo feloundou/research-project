@@ -12,7 +12,7 @@ from torch_cpo_utils import *
 from buffer_torch import *
 from models_torch import MLP_DiagGaussianPolicy, MLP
 
-from spinup_utils import *
+from utils import *
 from ppo_algos import *
 
 import wandb
@@ -97,7 +97,7 @@ class CPO:
 
         elif optim_mode == "adabelief":
             self.value_fun_optimizer = AdaBelief(self.value_fun.parameters(), betas=(0.9, 0.999), eps=1e-8)
-            self.cost_fun_optimizer = AdaBelief(self.cost_fun.parameters(), betas(0.9, 0.999), eps=1e-8)
+            self.cost_fun_optimizer = AdaBelief(self.cost_fun.parameters(), betas=(0.9, 0.999), eps=1e-8)
 
         else:
             self.value_fun_optimizer = LBFGS(self.value_fun.parameters(), lr=vf_lr, max_iter=optim_max_iter)
@@ -487,7 +487,7 @@ class CPO:
 
 if __name__ == '__main__':
     import argparse
-    from spinup_utils import setup_logger_kwargs
+    from utils import setup_logger_kwargs
 
     parser = argparse.ArgumentParser()
 

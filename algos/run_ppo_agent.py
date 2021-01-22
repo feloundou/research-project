@@ -3,12 +3,11 @@ import torch
 from torch.optim import Adam
 from adabelief_pytorch import AdaBelief
 
-
 import gym
 import safety_gym
 # from safety_gym.envs.engine import Engine
 
-from spinup_utils import *
+from utils import *
 from ppo_algos import *
 from agent_types import *
 
@@ -92,15 +91,12 @@ def ppo(env_fn,
     # W&B Logging
     wandb.login()
 
-    # print(ac_kwargs['hidden_sizes'][0])
-    # print(len(ac_kwargs['hidden_sizes']))
+    composite_name = 'ppo_penalized_' + config_name + '_' + str(int(steps_per_epoch/1000)) + \
+                     'Ks_' + str(epochs) + 'e_' + str(ac_kwargs['hidden_sizes'][0]) + 'x' + \
+                     str(len(ac_kwargs['hidden_sizes']))
 
-    composite_name = 'ppo_penalized_' + config_name + '_' + str(int(steps_per_epoch/1000)) + 'Ks_' + str(epochs) + 'e_' + str(ac_kwargs['hidden_sizes'][0]) + 'x' + str(len(ac_kwargs['hidden_sizes']))
-    print(composite_name)
-
-    PROJECT_NAME = composite_name
     # 4 million env interactions
-    wandb.init(project="ppo-experts-1000epochs", name=PROJECT_NAME)
+    wandb.init(project="ppo-experts-1000epochs", name=composite_name)
 
     # Special function to avoid certain slowdowns from PyTorch + MPI combo.
     setup_pytorch_for_mpi()
@@ -157,7 +153,6 @@ def ppo(env_fn,
 
     # Set up function for computing PPO policy loss
     def compute_loss_pi(data):
-
         obs, act, adv, logp_old = data['obs'], data['act'], data['adv'], data['logp']
 
         # Policy loss
@@ -275,7 +270,6 @@ def ppo(env_fn,
 
             # env.step => Take action
             next_o, r, d, info = env.step(a)
-            # print("outputs: next_o, r, d, info: ", next_o, r, d, info)
 
             # Include penalty on cost
             c = info.get('cost', 0)
@@ -288,18 +282,10 @@ def ppo(env_fn,
             ep_cost += c
             ep_len += 1
 
-            # if agent.reward_penalized:
-            # print("agent is being penalized")
             r_total = r - cur_penalty * c
             r_total /= (1 + cur_penalty)
 
-             # print("reward total: ", r_total)
-            # buf.store(o, a, r_total, v_t, 0, 0, logp_t, pi_info_t)
             buf.store(o, a, r_total, v, 0, 0, logp, info)
-            # print("buffer")
-            # print(buf)
-            # else:
-            #     buf.store(o, a, r, v, c, vc, logp, info)
 
             # save and log
             logger.store(VVals=v)
@@ -380,7 +366,7 @@ def ppo(env_fn,
 
 def main(config):
     import argparse
-    from spinup_utils import setup_logger_kwargs
+    from utils import setup_logger_kwargs
 
     parser = argparse.ArgumentParser()
     parser.add_argument('--env', type=str, default='Safexp-PointGoal1-v0')

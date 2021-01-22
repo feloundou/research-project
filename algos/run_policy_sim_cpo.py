@@ -3,7 +3,7 @@ import joblib
 import os
 import os.path as osp
 import torch
-from spinup_utils import *
+from utils import *
 import gym
 import safety_gym
 from safety_gym.envs.engine import Engine

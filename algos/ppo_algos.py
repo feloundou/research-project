@@ -10,7 +10,7 @@ import torch.nn as nn
 from torch.distributions.normal import Normal
 from torch.distributions.categorical import Categorical
 
-from spinup_utils import *
+from utils import *
 
 
 def mlp(sizes, activation, output_activation=nn.Identity):
@@ -60,6 +60,8 @@ class MLPGaussianActor(Actor):
         super().__init__()
         log_std = -0.5 * np.ones(act_dim, dtype=np.float32)
         self.log_std = torch.nn.Parameter(torch.as_tensor(log_std))
+        print("test list")
+        print(list(hidden_sizes))
         self.mu_net = mlp([obs_dim] + list(hidden_sizes) + [act_dim], activation)
 
     def _distribution(self, obs):

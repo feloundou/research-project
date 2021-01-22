@@ -13,7 +13,7 @@ from buffer_torch import *
 from models_torch import MLP_DiagGaussianPolicy, MLP
 
 
-from spinup_utils import *
+from utils import *
 # from ppo_algos import *
 
 
@@ -437,7 +437,7 @@ class TRPO:
 
 if __name__ == '__main__':
     import argparse
-    from spinup_utils import setup_logger_kwargs
+    from utils import setup_logger_kwargs
     import os as osp
 
     parser = argparse.ArgumentParser()

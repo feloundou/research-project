@@ -14,7 +14,7 @@ import gym
 import safety_gym
 from safety_gym.envs.engine import Engine
 
-from spinup_utils import *
+from utils import *
 from ppo_algos import *
 from agent_types import *
 
