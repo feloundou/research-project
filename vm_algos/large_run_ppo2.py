@@ -14,7 +14,7 @@ from agent_types import *
 import wandb
 wandb.login()
 
-RUN_NAME = 'ppo_penalized_peony_20Ks_1Ke_128x4'
+RUN_NAME = 'ppo_penalized_magnolia_20Ks_1Ke_128x4'
 wandb.init(project='ppo-experts-1000epochs', name=RUN_NAME)
 
 def print_hello(rank, size, name):
@@ -367,6 +367,9 @@ if __name__ == "__main__":
                      hid=128,
                      l=4)
 
+
+  petrichor_config = dict(penalty_lr=0.025, cost_lim=25, gamma=0.99, lam=0.95, seed=0, steps=20000, hid=128, l=4)
+
   rose_config = dict(penalty_lr=0.025, cost_lim=0, gamma=0.99, lam=0.98, seed=0, steps=20000, hid=128, l=4)
 
   hyacinth_config = dict(penalty_lr=0.025, cost_lim=10, gamma=0.99, lam=0.98, seed=0, steps=20000, hid=128, l=4) 
@@ -377,19 +380,25 @@ if __name__ == "__main__":
 
   peony_config = dict(penalty_lr=0.025, cost_lim=10, gamma=0.99, lam=0.95, seed=0, steps=20000, hid=128, l=4)
 
+  violet_config = dict(penalty_lr=0.025, cost_lim=0, gamma=0.999, lam=0.95, seed=0, steps=20000, hid=128, l=4)
+
+  buttercup_config = dict(penalty_lr=0.001, cost_lim=0, gamma=1, lam=0.95, seed=0, steps=20000, hid=256, l=4)  
+
+  magnolia_config = dict(penalty_lr=0.01, cost_lim=0.5, gamma=1, lam=0.98, seed=123, steps=20000, hid=128, l=4)
+
   # Run experiment
   ppo(lambda: gym.make('Safexp-PointGoal1-v0'),
       actor_critic=MLPActorCritic,
       agent=PPOAgent(),
-      ac_kwargs=dict(hidden_sizes=[peony_config['hid']] * peony_config['l']),
-      gamma=peony_config['gamma'],
-      lam=peony_config['lam'],
+      ac_kwargs=dict(hidden_sizes=[magnolia_config['hid']] * magnolia_config['l']),
+      gamma=magnolia_config['gamma'],
+      lam=magnolia_config['lam'],
       cost_gamma=0.99,
-      seed=peony_config['seed'],
-      steps_per_epoch=peony_config['steps'],
+      seed=magnolia_config['seed'],
+      steps_per_epoch=magnolia_config['steps'],
       epochs=1000,
-      cost_lim=peony_config['cost_lim'],
-      penalty_lr=peony_config['penalty_lr'],
+      cost_lim=magnolia_config['cost_lim'],
+      penalty_lr=magnolia_config['penalty_lr'],
       logger_kwargs=logger_kwargs)
 
   print("Hi, Computer")
