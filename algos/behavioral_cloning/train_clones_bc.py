@@ -39,9 +39,7 @@ record_expert=True
 pull_from_file = False
 
 MAX_STEPS = 1000
-
-save_every=10
-
+save_every= 10
 
 BATCH_SIZE = 100
 replay_buffer_size = 10000
@@ -49,7 +47,7 @@ replay_buffer_size = 10000
 episode_tests = 50
 record_tests = 100
 
-epochs = 1000
+epochs = 250
 train_iters=100
 
 # Neural Network Size
