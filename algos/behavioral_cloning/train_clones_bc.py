@@ -2,10 +2,10 @@ import sys, os, random, pickle
 import numpy as np
 import pandas as pd
 import torch.nn as nn
+
 import torch.nn.functional as F
-from torch.optim import Adam
-from torch.utils.data import Dataset, DataLoader
-from torch.distributions.independent import Independent
+from six.moves.collections_abc import Sequence
+
 from cpprb import ReplayBuffer, create_before_add_func, create_env_dict, train
 from run_policy_sim_ppo import *
 
@@ -27,24 +27,39 @@ DATA_PATH = '/home/tyna/Documents/openai/research-project/expert_data/'
 base_path = '/home/tyna/Documents/openai/research-project/data/'
 # expert_path = '/home/tyna/Documents/openai/research-project/expert_data/'
 # config_name = 'cyan'
-config_name = 'hyacinth'
+config_name = 'lilly'
 DEMO_DIR = os.path.join(DATA_PATH, config_name + '_episodes/')
 
 RENDER = True
+efficiency_eval= False
+record_clone=False
+record_expert=True
+# PREPARE DATA
+# Should we get the replay buffer from file or not?
+pull_from_file = False
+
 MAX_STEPS = 1000
+
+save_every=10
+
+
 BATCH_SIZE = 100
 replay_buffer_size = 10000
 
-episode_tests = 10
-epochs = 100
+episode_tests = 50
+record_tests = 100
+
+epochs = 1000
 train_iters=100
 
 # Neural Network Size
 hid_size = 128
 n_layers = 2
-record=True
+
 
 fname = config_name + "_clone_" + str(epochs) + 'ep_' + str(train_iters) + 'train_it'
+
+
 seed=0
 
 # Random seed
@@ -59,12 +74,10 @@ env_dict = create_env_dict(env)
 obs_dim = env.observation_space.shape
 act_dim = env.action_space.shape
 
-# PREPARE DATA
-# Should we get the replay buffer from file or not?
-pull_from_file = False
+
 
 if pull_from_file:
-    f = open(DEMO_DIR + 'sim_data_7263_buffer.pkl', "rb")
+    f = open(DEMO_DIR + 'sim_data_' + str(episode_tests) + '_buffer.pkl', "rb")
     buffer_file = pickle.load(f)
     f.close()
 
@@ -104,7 +117,7 @@ else:
                            0,
                            episode_tests,
                            False,
-                           record=record,
+                           record=record_expert,
                            data_path=DATA_PATH,
                            config_name=config_name,
                            max_len_rb=replay_buffer_size)
@@ -114,7 +127,7 @@ else:
 
 # Create policy class
 
-
+#
 # class Policy(nn.Module):
 #     def __init__(self, state_dim, hidden_dim, action_dim):
 #         super(Policy, self).__init__()
@@ -132,6 +145,30 @@ else:
 #         x_var = self.linear_var(x)
 #         return x_mu, x_var
 
+
+
+class GaussianActor(nn.Module):
+
+    def __init__(self, obs_dim, act_dim, hidden_sizes, activation):
+        super().__init__()
+        log_std = -0.5 * np.ones(act_dim, dtype=np.float32)
+        self.log_std = torch.nn.Parameter(torch.as_tensor(log_std))
+        print("obs vals")
+        print([obs_dim] + list(hidden_sizes) + [act_dim])
+        # self.mu_net = mlp([obs_dim] + list(hidden_sizes) + [act_dim], activation)
+        self.shared_net = mlp([obs_dim] + list(hidden_sizes), activation)
+        self.mu_net = nn.Linear(hidden_sizes[-1], act_dim)
+        self.var_net = nn.Linear(hidden_sizes[-1], act_dim)
+
+    def forward(self, x):
+        mu = self.mu_net(F.leaky_relu(self.shared_net(x)))
+        std = self.var_net(F.leaky_relu(self.shared_net(x)))
+
+        return Normal(loc=mu, scale=std).rsample()
+
+
+
+
 # Special function to avoid certain slowdowns from PyTorch + MPI combo.
 setup_pytorch_for_mpi()
 
@@ -142,10 +179,17 @@ logger = EpochLogger(**logger_kwargs)
 
 # Setup policy, optimizer and criterion
 # clone_pi = Policy(env.observation_space.shape[0], hid_size, env.action_space.shape[0])
-ac_kwargs=dict(hidden_sizes=[hid_size] * n_layers)
-clone_pi = MLPGaussianActor(obs_dim, env.action_space.shape[0], activation=nn.Tanh, hidden_sizes=[128,128])
-pi_optimizer = Adam(clone_pi.parameters(), lr=3e-4, weight_decay=0.0001)
+ac_kwargs= dict(hidden_sizes=[hid_size] * n_layers)
+
+clone_pi = GaussianActor(obs_dim[0], env.action_space.shape[0], activation=nn.LeakyReLU, **ac_kwargs)
+# pi_optimizer = Adam(clone_pi.parameters(), lr=3e-4, weight_decay=0.0001)
+pi_optimizer = AdaBelief(clone_pi.parameters(), betas=(0.9, 0.999), eps=1e-16)
+
 criterion = nn.MSELoss()
+
+# Once done, save the clone model
+logger.setup_pytorch_saver(clone_pi)
+
 
 # Sync params across process
 sync_params(clone_pi)
@@ -155,8 +199,36 @@ wandb.login()
 wandb.init(project='behavioral_clone_training', name=fname)
 wandb.watch(clone_pi)  # watch neural net
 
+
+def line_series(xs, ys, keys=None, title=None, xname=None):
+    data = []
+    if not isinstance(xs[0], Sequence):
+        xs = [xs for _ in range(len(ys))]
+    assert len(xs) == len(ys), "Number of x-lines and y-lines must match"
+    for i, series in enumerate([list(zip(xs[i], ys[i])) for i in range(len(xs))]):
+        for x, y in series:
+            if keys is None:
+                key = "key_{}".format(i)
+            else:
+                key = keys[i]
+            data.append([x, key, y])
+
+    table = wandb.Table(data=data, columns=["step", "lineKey", "lineVal"])
+
+    return wandb.plot_table(
+        "wandb/lineseries/v0",
+        table,
+        {"step": "step", "lineKey": "lineKey", "lineVal": "lineVal"},
+        {"title": title, "xname": xname or "x"},
+    )
+
+
+MAX_R = [0]
+MIN_C = [1000]
+
 for epoch in range(epochs):
     total_loss = 0
+
     # for i, data in enumerate(loader):
     for i in range(train_iters):
 
@@ -170,16 +242,11 @@ for epoch in range(epochs):
 
         pi_optimizer.zero_grad()
         # Policy loss
-        pi  = clone_pi._distribution(states)
-        a = pi.sample()
-        # logp_a = pi._log_prob_from_distribution(pi, a)
-        # a_mu, a_sigma = clone_pi(torch.tensor(states).float())
-        # a_pred = Normal(loc=a_mu, scale=a_sigma).rsample()
-        a_pred= a
-        print("predicted a: ", a)
+
+        a_pred = clone_pi(torch.tensor(states).float())
         loss = criterion(a_pred, torch.tensor(actions))
         
-        print("Loss!", loss)
+        # print("Loss!", loss)
         total_loss += loss.item()
         loss.backward()
         if i % 20 == 19:
@@ -187,15 +254,71 @@ for epoch in range(epochs):
             total_loss = 0
             epoch_metrics = {'20it average epoch loss': total_loss / 20}
             wandb.log(epoch_metrics)
+
         pi_optimizer.step()
 
-    # Once done, save the clone model
-    logger.setup_pytorch_saver(clone_pi)
+
+
+    if efficiency_eval:
+        max_return = 0
+        min_cost = 0
+        for _ in range(5):
+            obs = env.reset()
+            done = False
+            steps = 0
+
+            while not done:
+                a = clone_pi(torch.tensor(obs).float())
+                obs, r, done, info = env.step(a.detach().numpy())
+                cost = info['cost']
+
+                max_return = max(max_return, r)
+                min_cost  = min(min_cost, cost)
+
+                steps += 1
+                if steps >= MAX_STEPS:
+                    break
+        print("max return: ", max_return)
+        MAX_R.append(max(max_return, max(MAX_R)))
+        MIN_C.append(min(min_cost, min(MIN_C)))
+        print("MAX R: ", MAX_R)
+
+        best_metrics = {'max return': max_return, 'min cost': min_cost}
+        wandb.log(best_metrics)
+
+
+
+    # Save model and save last trajectory
+    if (epoch % save_every == 0) or (epoch == epochs - 1):
+        logger.save_state({'env': env}, None)
+
+columns = ['Max Return']
+# xs = list([[i] for i in range(epochs)])
+xs = list([i for i in range(epochs)])
+print("xs ", xs)
+MAX_R.pop(0)
+ys = [MAX_R]
+# ys = [[ys[i]] for i in range(len(ys))]
+
+wandb.log({"efficiency gains": line_series(xs=xs, ys=ys, keys=None, title="Learning Efficiency Metrics")})
+
+
+
+# wandb.log({"effiency gains": wandb.plot.line(x=xs, y=ys,  title="Learning Efficiency Metrics")})
+
+
 
 wandb.finish()
 
+# periodically, during the behavioral cloning, evaluate model against expert policy
+# average episodic return
+# investigate how much data I need
+# train until loss tops out
+# what is the best performance for behavioral cloning at the best point
+
+
 # Play episodes and record
-if record:
+if record_clone:
     # Logging
     # wandb.login()
     wandb.init(project="clone_benchmarking_" + config_name , name=config_name + "_clone_" + str(epochs) + 'ep_' + str(train_iters) + 'train_it')
@@ -210,7 +333,7 @@ if record:
     cum_cost = 0
 
     # Play clone episodes
-    for i in range(episode_tests):
+    for i in range(record_tests):
         print('iter', i)
         obs = env.reset()
         done = False
@@ -219,8 +342,10 @@ if record:
         steps = 0
 
         while not done:
-            a_mu, a_sigma = pi(torch.from_numpy(obs).float())
-            a = Normal(loc=a_mu, scale=a_sigma).sample()
+            # a_mu, a_sigma = clone_pi(torch.from_numpy(obs).float())
+            # a = Normal(loc=a_mu, scale=a_sigma).sample()
+            a = clone_pi(torch.tensor(obs).float())
+
             obs, r, done, info = env.step(a.detach().numpy())
             cost = info['cost']
             if RENDER:

@@ -1,0 +1,1 @@
+{"graph_0": {"_type": "graph-file", "path": "media/graph/graph_0_summary_4c94bc21.graph.json", "sha256": "4c94bc2175cf373cb76f149a0d677116e455eb18edbcf583d28fb57d0e9617bf", "size": 1271}, "20it average epoch loss": 0.0, "_step": 16, "_runtime": 15, "_timestamp": 1611345985, "max return": 0.019780699694876613, "min cost": 0}

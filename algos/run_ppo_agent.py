@@ -122,6 +122,8 @@ def ppo(env_fn,
 
     # Create actor-critic module and monitor it
     ac = actor_critic(env.observation_space, env.action_space, **ac_kwargs)
+    # print("KWARGS")
+    # print(ac_kwargs)
     # wandb.watch(ac)
 
     # Sync params across processes
@@ -266,6 +268,7 @@ def ppo(env_fn,
     for epoch in range(epochs):
 
         for t in range(local_steps_per_epoch):
+
             a, v, vc, logp = ac.step(torch.as_tensor(o, dtype=torch.float32))
 
             # env.step => Take action
