@@ -23,7 +23,7 @@ import wandb
 
 # wandb.init(project=PROJECT_NAME)
 
-from run_ppo_agent import *
+from train_expert_ppo import *
 
 # Experimentation
 # We have two experimentation options: Experiment Grid and wandb hyperparameter sweep

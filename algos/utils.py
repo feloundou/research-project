@@ -7,7 +7,7 @@ import os.path as osp, time, atexit, os
 import warnings
 import torch.nn.functional as F
 from ppo_algos import *
-from abc import ABC, abstractmethod
+
 
 from mpi4py import MPI
 import numpy as np
@@ -67,8 +67,6 @@ class GaussianActor(nn.Module):
         super().__init__()
         log_std = -0.5 * np.ones(act_dim, dtype=np.float32)
         self.log_std = torch.nn.Parameter(torch.as_tensor(log_std))
-        print("obs vals")
-        print([obs_dim] + list(hidden_sizes) + [act_dim])
         # self.mu_net = mlp([obs_dim] + list(hidden_sizes) + [act_dim], activation)
         self.shared_net = mlp([obs_dim] + list(hidden_sizes), activation)
         self.mu_net = nn.Linear(hidden_sizes[-1], act_dim)
@@ -325,50 +323,6 @@ def discount_cumsum(x, discount):
     """
     return scipy.signal.lfilter([1], [1, float(-discount)], x[::-1], axis=0)[::-1]
 
-
-
-class Clone(ABC):
-    """
-    Abstract agent class
-    """
-
-    @abstractmethod
-    def act(self, state, reward=None):
-        """
-        Select an action for evaluation.
-        If the agent has a replay-buffer, state and reward are stored.
-        Args:
-            state (rlil.environment.State): The environment state at the current timestep.
-            reward (torch.Tensor): The reward from the previous timestep.
-        Returns:
-            rllib.Action: The action to take at the current timestep.
-        """
-
-    @abstractmethod
-    def make_lazy_agent(self, evaluation=False):
-        """
-        Return a LazyAgent object for sampling or evaluation.
-        Args:
-            evaluation (bool, optional): If evaluation==True, the returned
-            object act greedily. Defaults to False.
-        Returns:
-            LazyAgent: The LazyAgent object for Sampler.
-        """
-        pass
-
-    def train(self):
-        """
-        Update internal parameters
-        """
-        pass
-
-    def load(self, dirname):
-        """
-        Load pretrained agent.
-        Args:
-            dirname (str): Directory where the agent saved
-        """
-        pass
 
 
 class Logger:

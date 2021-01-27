@@ -1,4 +1,4 @@
-program: run_ppo_agent.py
+program: train_expert_ppo.py
 method: bayes
 #metric:
 #  name: val_loss

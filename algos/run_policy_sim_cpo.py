@@ -10,7 +10,7 @@ from safety_gym.envs.engine import Engine
 
 from torch_cpo_utils import *
 # from cpo_torch import CPO
-from run_cpo_agent import *
+from train_expert_cpo import *
 from buffer_torch import *
 from models_torch import MLP_DiagGaussianPolicy, MLP
 

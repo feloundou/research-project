@@ -113,7 +113,8 @@ def train_clones(config_name,
                  clone_pi,
                  expert_pi,
                  pi_optimizer,
-                 save_every):
+                 save_every,
+                 print_every):
     print(colorize("Training clones of %s config over %s episodes" % (config_name, epochs),
                    'green', bold=True))
 
@@ -122,8 +123,6 @@ def train_clones(config_name,
     # PROJECT_NAME = 'clone_benchmarking_' + config_name
     wandb.init(project='clone_benchmarking_' + config_name, name=fname)
     # wandb.watch(clone_pi)  # watch neural net #only do this when not looping
-
-    print_freq = 20
 
     AVG_R = []
     AVG_C = []
@@ -168,9 +167,9 @@ def train_clones(config_name,
             # print("Loss!", loss)
             total_loss += loss.item()
             loss.backward()
-            if t % print_freq == print_freq-1:
-                print(colorize('Epoch:%d Batch:%d Loss:%.4f' % (epoch, t + 1, total_loss / print_freq), 'yellow', bold=True))
-                epoch_metrics = {'20it average epoch loss': total_loss / print_freq}
+            if t % print_every == print_every-1:
+                print(colorize('Epoch:%d Batch:%d Loss:%.4f' % (epoch, t + 1, total_loss / print_every), 'yellow', bold=True))
+                epoch_metrics = {'20it average epoch loss': total_loss / print_every}
                 wandb.log(epoch_metrics)
                 total_loss = 0
 
@@ -369,7 +368,6 @@ seed += 10000 * proc_id()
 torch.manual_seed(seed)
 np.random.seed(seed)
 
-
 # Special function to avoid certain slowdowns from PyTorch + MPI combo.
 setup_pytorch_for_mpi()
 
@@ -391,21 +389,18 @@ sync_params(clone_pi)
 
 # ==================================================================================== #
 
-
 # Get expert trajectories for first time
 # replay_buffer = get_expert_trajectories(config_name=config_name, pull_from_file=False, num_episodes_play=NUM_EXPERT_EPISODES,
 #                                         rb_size=RB_SIZE, obs_dim=obs_dim, act_dim=act_dim, base_path=base_path,
 #                                         demo_dir=DEMO_DIR)
 
-
 # EPISODE_PARM_LIST = [1000, 500, 250, 100, 50, 25, 10]
 # EPOCHS_SETTINGS=  [10, 25, 50, 100]
 
 EPISODE_PARM_LIST = [1000, 500, 250, 100, 50, 25, 10]
-EPOCHS_SETTINGS=  [10, 25, 50]
+EPOCHS_SETTINGS =  [10, 25, 50]
 
 for expert_pm in EPISODE_PARM_LIST:
-
     # Get prerecorded trajectories
     replay_buffer = get_expert_trajectories(config_name=config_name, pull_from_file=True, num_episodes_play=expert_pm,
                                             rb_size=RB_SIZE, obs_dim=obs_dim, act_dim=act_dim, base_path=base_path,
@@ -414,9 +409,9 @@ for expert_pm in EPISODE_PARM_LIST:
     print("got replay buffer for: ", expert_pm)
 
     for epoch_schedule in EPOCHS_SETTINGS:
-        print("training for: ", epoch_schedule)
+        # print("training for: ", epoch_schedule)
 
         train_clones(config_name = config_name, epochs=epoch_schedule, train_iters=30, eval_iters=5, eval_freq=5, efficiency_eval=True,
-                     replay_buffer=replay_buffer, clone_pi=clone_pi, expert_pi=expert_pi, pi_optimizer=pi_optimizer, save_every=10)
+                     replay_buffer=replay_buffer, clone_pi=clone_pi, expert_pi=expert_pi, pi_optimizer=pi_optimizer, save_every=10, print_every=10)
 
 # run_clone_sim(config_name=config_name, env=env, fname=fname, record_clone=True, num_episodes=100, clone_policy=clone_pi, render=True)

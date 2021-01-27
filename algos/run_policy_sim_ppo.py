@@ -74,7 +74,7 @@ def load_pytorch_policy(fpath, itr, deterministic=False):
     return get_action
 
 
-def run_policy(env, get_action, max_ep_len=None, num_episodes=100, render=True, record=False, record_project= 'benchmarking', record_name = 'trained' , data_path='', config_name='test', max_len_rb=100, benchmark=False):
+def run_policy(env, get_action, max_ep_len=None, num_episodes=100, render=True, record=False, record_project= 'benchmarking', record_name = 'trained' , data_path='', config_name='test', max_len_rb=100, benchmark=False, log_prefix=''):
     assert env is not None, \
         "Environment not found!\n\n It looks like the environment wasn't saved, " + \
         "and we can't run the agent in it. :( \n\n Check out the readthedocs " + \
@@ -102,8 +102,6 @@ def run_policy(env, get_action, max_ep_len=None, num_episodes=100, render=True, 
         ep_rewards = []
 
     if record:
-
-
         wandb.login()
         # 4 million env interactions
         wandb.init(project=record_project, name=record_name)
@@ -162,18 +160,15 @@ def run_policy(env, get_action, max_ep_len=None, num_episodes=100, render=True, 
             rew_mov_avg_10.append(ep_ret)
             cost_mov_avg_10.append(ep_cost)
 
-            # cum_ret += ep_ret
-            # cum_cost += ep_cost
-
             mov_avg_ret = np.mean(rew_mov_avg_10)
             mov_avg_cost = np.mean(cost_mov_avg_10)
 
-            expert_metrics = {'episode return': ep_ret,
-                              'episode cost': ep_cost,
+            expert_metrics = {log_prefix + ' episode return': ep_ret,
+                              log_prefix + ' episode cost': ep_cost,
                               # 'cumulative return': cum_ret,
                               # 'cumulative cost': cum_cost,
-                              '25ep mov avg return': mov_avg_ret,
-                              '25ep mov avg cost': mov_avg_cost
+                              log_prefix + ' 25ep mov avg return': mov_avg_ret,
+                              log_prefix + ' 25ep mov avg cost': mov_avg_cost
                               }
 
             if benchmark:

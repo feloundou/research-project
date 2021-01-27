@@ -14,7 +14,7 @@ import gym
 import safety_gym
 from safety_gym.envs.engine import Engine
 
-from run_cpo_agent import *
+from train_expert_cpo import *
 
 
 import wandb

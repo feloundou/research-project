@@ -397,7 +397,6 @@ class Simulator:
     def __init__(self, env_name, policy, n_episodes, max_ep_len, obs_filter=None, **env_args):
         print("simulator init")
 
-
         # self.env = np.asarray([make_env(env_name, **env_args) for i in range(n_trajectories)])
         self.env = np.asarray([gym.make(env_name) for i in range(n_episodes)])
         # print("environment")
