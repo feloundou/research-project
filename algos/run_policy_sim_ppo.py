@@ -132,9 +132,6 @@ def run_policy(env, get_action, max_ep_len=None, num_episodes=100, render=True, 
             done_int = int(d==True)
             rb.add(obs=o, act=a, rew=r, next_obs=next_o, done=done_int)
 
-            # iteration = dict(observation=[next_o], action=[a], reward=r, cost = info['cost'], done=d)
-
-
         ep_ret += r
         ep_len += 1
         ep_cost += info['cost']
@@ -163,12 +160,12 @@ def run_policy(env, get_action, max_ep_len=None, num_episodes=100, render=True, 
             mov_avg_ret = np.mean(rew_mov_avg_10)
             mov_avg_cost = np.mean(cost_mov_avg_10)
 
-            expert_metrics = {log_prefix + ' episode return': ep_ret,
-                              log_prefix + ' episode cost': ep_cost,
+            expert_metrics = {log_prefix + 'episode return': ep_ret,
+                              log_prefix + 'episode cost': ep_cost,
                               # 'cumulative return': cum_ret,
                               # 'cumulative cost': cum_cost,
-                              log_prefix + ' 25ep mov avg return': mov_avg_ret,
-                              log_prefix + ' 25ep mov avg cost': mov_avg_cost
+                              log_prefix + '25ep mov avg return': mov_avg_ret,
+                              log_prefix + '25ep mov avg cost': mov_avg_cost
                               }
 
             if benchmark:

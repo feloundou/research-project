@@ -117,3 +117,45 @@ class MLPActorCritic(nn.Module):
 
     def act(self, obs):
         return self.step(obs)[0]
+
+
+
+class GaussianActor(nn.Module):
+    def __init__(self, obs_dim, act_dim, hidden_sizes, activation):
+        super().__init__()
+        # log_std = -0.5 * np.ones(act_dim, dtype=np.float32)
+        # self.log_std = torch.nn.Parameter(torch.as_tensor(log_std))
+        # self.mu_net = mlp([obs_dim] + list(hidden_sizes) + [act_dim], activation)
+        self.shared_net = mlp([obs_dim] + list(hidden_sizes), activation)
+        self.mu_net = nn.Linear(hidden_sizes[-1], act_dim)
+        self.var_net = nn.Linear(hidden_sizes[-1], act_dim)
+
+    def forward(self, x):
+        mu = self.mu_net(F.leaky_relu(self.shared_net(x)))
+        std = self.var_net(F.leaky_relu(self.shared_net(x)))
+        return Normal(loc=mu, scale=std).rsample()
+
+
+
+class DistilledGaussianActor(nn.Module):
+    def __init__(self, obs_dim, act_dim, hidden_sizes, activation, n_experts):
+        super().__init__()
+
+        log_std = -0.5 * np.ones(act_dim, dtype=np.float32)
+        self.log_std = torch.nn.Parameter(torch.as_tensor(log_std))
+        print("log std")
+        print(log_std)
+        print("log std parm")
+        print(self.log_std)
+
+
+        # self.mu_net = mlp([obs_dim] + list(hidden_sizes) + [act_dim], activation)
+        self.shared_net = mlp([obs_dim] + list(hidden_sizes), activation)
+        self.mu_net = nn.Linear(hidden_sizes[-1], act_dim)
+        self.var_net = nn.Linear(hidden_sizes[-1], act_dim)
+
+    def forward(self, x):
+
+        mu = self.mu_net(F.leaky_relu(self.shared_net(x)))
+        std = self.var_net(F.leaky_relu(self.shared_net(x)))
+        return Normal(loc=mu, scale=std).rsample()

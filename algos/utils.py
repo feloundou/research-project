@@ -62,22 +62,6 @@ class Policy(nn.Module):
         x_var = self.linear_var(x)
         return x_mu, x_var
 
-class GaussianActor(nn.Module):
-    def __init__(self, obs_dim, act_dim, hidden_sizes, activation):
-        super().__init__()
-        log_std = -0.5 * np.ones(act_dim, dtype=np.float32)
-        self.log_std = torch.nn.Parameter(torch.as_tensor(log_std))
-        # self.mu_net = mlp([obs_dim] + list(hidden_sizes) + [act_dim], activation)
-        self.shared_net = mlp([obs_dim] + list(hidden_sizes), activation)
-        self.mu_net = nn.Linear(hidden_sizes[-1], act_dim)
-        self.var_net = nn.Linear(hidden_sizes[-1], act_dim)
-
-    def forward(self, x):
-        mu = self.mu_net(F.leaky_relu(self.shared_net(x)))
-        std = self.var_net(F.leaky_relu(self.shared_net(x)))
-
-        return Normal(loc=mu, scale=std).rsample()
-
 def setup_pytorch_for_mpi():
     """
     Avoid slowdowns caused by each separate process's PyTorch using
