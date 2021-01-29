@@ -668,26 +668,15 @@ class DistillBehavioralClone(BehavioralClone):
             total_loss = 0
 
             for t in range(train_iters):
-                # index = t % len(self.rb_list)
-
                 SAMPLE_LIST = []
 
                 for x in self.rb_list:
                     expert_sample = x.sample(batch_size)
                     SAMPLE_LIST.append(expert_sample)
 
-                # target = torch.randint(0, 2, (2,))
-                # one_hot = torch.nn.functional.one_hot(target)
-
-                # print("target")
-                # print(target)
-                # print(one_hot)
-
                 states_list = [sample['obs'] for sample in SAMPLE_LIST]
                 actions_list = [sample['act'] for sample in SAMPLE_LIST]
                 rewards_list = [sample['rew'] for sample in SAMPLE_LIST]
-
-
 
                 states = None
                 actions = None
@@ -699,25 +688,12 @@ class DistillBehavioralClone(BehavioralClone):
                     else:
                         states += torch.tensor(states_list)*item
                         actions += torch.tensor(actions_list)*item
-                #
-                # print("SUM")
-                # print(sum)
-
-
-
 
                 self.optimizer.zero_grad()
-
-                # for ix in
-
-                # states = states_list[index]
-                # actions = actions_list[index]
 
                 # Policy loss
                 a_pred = self.clone_policy(states.float())
                 loss = self.criterion(a_pred, actions)
-                # a_pred = self.clone_policy(torch.tensor(states).float())
-                # loss = self.criterion(a_pred, torch.tensor(actions))
 
                 # print("Loss!", loss)
                 total_loss += loss.item()

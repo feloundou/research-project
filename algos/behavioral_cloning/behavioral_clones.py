@@ -13,8 +13,8 @@ ENV_NAME = 'Safexp-PointGoal1-v0'
 env = gym.make(ENV_NAME)
 
 # Setup policy, optimizer and criterion
-hid_size = 128
-n_layers = 2
+hid_size = 256
+n_layers = 4
 
 ac_kwargs = dict(hidden_sizes=[hid_size] * n_layers)
 clone_pi = GaussianActor(env.observation_space.shape[0], env.action_space.shape[0], activation=nn.LeakyReLU, **ac_kwargs)
@@ -39,7 +39,7 @@ print("here we go again")
 config_name_list = ['marigold', 'rose']
 
 marigold_clone_distill = DistillBehavioralClone(config_name_list=config_name_list,
-                                                input_vector=[0, 1],
+                                                input_vector=[0.5, 0.5],
                                                 config_name='marigold',
                                                 record_samples=True,
                                                 clone_epochs=100,
@@ -59,11 +59,11 @@ marigold_clone_distill.set_multiple_replay_buffers(env=env)
 
 # attempts at policy distillation
 marigold_clone_distill.dualtrain_clone2(env=env, train_iters=100, batch_size=100,
-                                        exp_name='distilltest_rose_marigold_clone_[0,1]')
+                                        exp_name='distilltest_rose_marigold_clone_[0.5,0.5]')
 
 
 # Run episode simulations
-# marigold_clone_distill.run_clone_sim(env, record_clone=True, num_episodes=100, render=False)
+marigold_clone_distill.run_clone_sim(env, record_clone=True, num_episodes=100, render=False)
 
 
 print("done")
