@@ -12,6 +12,10 @@ from six.moves.collections_abc import Sequence
 
 from run_policy_sim_ppo import load_policy_and_env, run_policy
 
+# Representation utils
+def one_hot(a, num_classes):
+    return np.squeeze(np.eye(num_classes)[a.reshape(-1)])
+
 
 # Plot utils
 
@@ -490,16 +494,7 @@ class DistillBehavioralClone(BehavioralClone):
                                              "next_obs": {"shape": tuple([obs_dim[0]+2,])},
                                              "done": {}})
 
-            # print("hello")
-            # input_vector = [0, 1]
 
-            # print9
-
-            def one_hot(a, num_classes):
-                return np.squeeze(np.eye(num_classes)[a.reshape(-1)])
-
-            # print("one HOT mama")
-            # print(one_hot(np.array([0]), 2))
 
             # Concatenate the states with one hot vectors depending on class
             extend1 = [one_hot(np.array([v]), self.n_experts)] * np_states[~np_dones].shape[0]
@@ -507,22 +502,6 @@ class DistillBehavioralClone(BehavioralClone):
             appended_states = np.append(np_states[~np_dones], np.c_[extend1], 1)
             appended_next_states = np.append(np_next_states[~np_dones], np.c_[extend1], 1)
 
-            # print("now trying cold mama")
-            # print(appended_states)
-            # print(ix_vectors[v])
-
-            # extend = [ix_vectors[v]] * np_states[~np_dones].shape[0]
-
-            # print("extendnew")
-            # print(extend1)
-            # print(type(extend1))
-            # print("extendold")
-            # print(extend)
-            # print(type(extend))
-
-
-            # appended_states = np.append(np_states[~np_dones], np.c_[extend], 1)
-            # appended_next_states = np.append(np_next_states[~np_dones], np.c_[extend], 1)
 
 
 
@@ -553,32 +532,6 @@ class DistillBehavioralClone(BehavioralClone):
             total_loss = 0
 
             for t in range(train_iters):
-                # SAMPLE_LIST = []
-
-                # for x in self.rb_list:
-                #     expert_sample = x.sample(batch_size)
-                    # SAMPLE_LIST.append(expert_sample)
-
-                # states_list = [sample['obs'] for sample in SAMPLE_LIST]
-                # actions_list = [sample['act'] for sample in SAMPLE_LIST]
-                # rewards_list = [sample['rew'] for sample in SAMPLE_LIST]
-
-                # states, actions = None, None
-                #
-                # for item in self.input_vector:
-                #
-                #     if states is None:
-                #         states = torch.tensor(states_list)*item
-                #         actions = torch.tensor(actions_list)*item
-                #     else:
-                #         states += torch.tensor(states_list)*item
-                #         actions += torch.tensor(actions_list)*item
-
-                # self.optimizer.zero_grad()
-                #
-                # # Policy loss
-                # a_pred = self.clone_policy(states.float())
-                # loss = self.criterion(a_pred, actions)
 
                 index = t % len(self.rb_list)
 
