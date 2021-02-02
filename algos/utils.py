@@ -7,7 +7,7 @@ import os.path as osp, time, atexit, os
 import warnings
 import torch.nn.functional as F
 from ppo_algos import *
-
+from torch import nn
 
 from mpi4py import MPI
 import numpy as np

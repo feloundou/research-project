@@ -1,4 +1,4 @@
-from clone_utils import *
+from behavioral_cloning.clone_utils import *
 from adabelief_pytorch import AdaBelief
 
 import gym
@@ -35,11 +35,9 @@ distilled_criterion = nn.MSELoss()
 
 # Create dual clone
 
-print("here we go again")
 config_name_list = ['marigold', 'rose']
 
 marigold_clone_distill = DistillBehavioralClone(config_name_list=config_name_list,
-                                                input_vector=[0.5, 0.5],
                                                 config_name='marigold',
                                                 record_samples=True,
                                                 clone_epochs=100,
@@ -58,15 +56,21 @@ marigold_clone_distill.set_multiple_replay_buffers(env=env)
 # marigold_clone_distill.dualtrain_clone1(env=env, train_iters=100, batch_size=100)
 
 # attempts at policy distillation
-marigold_clone_distill.dualtrain_clone2(env=env, train_iters=100, batch_size=100,
-                                        exp_name='distilltest_rose_marigold_clone_[0.5,0.5]')
+marigold_clone_distill.dualtrain_clone2(env=env, train_iters=200, batch_size=100,
+                                        exp_name='distilltest_rose_marigold_clone_[arbitrary]')
 
 
 # Run episode simulations
-marigold_clone_distill.run_clone_sim(env, record_clone=True, num_episodes=100, render=False)
+# marigold_clone_distill.run_clone_sim(env, record_clone=True, num_episodes=100, render=False, input_vector=[1,0])
+# marigold_clone_distill.run_clone_sim(env, record_clone=True, num_episodes=100, render=False, input_vector=[0, 1])
+marigold_clone_distill.run_clone_sim(env, record_clone=True, num_episodes=100, render=False, input_vector=[0.8, 0.2])
 
-
-print("done")
+wandb.finish()
+#
+# PROJECT_NAME = 'distillppo_tests'
+# wandb.init(project=PROJECT_NAME,name=marigold_clone_distill.fname)
+# marigold_clone_distill.run_clone_sim(env, record_clone=True, num_episodes=100, render=False, input_vector=[0, 1])
+# # print("done")
 
 
 ####################################################################################3

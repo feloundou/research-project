@@ -45,17 +45,6 @@ class Clone(ABC):
     Abstract clone class
     """
 
-    # @abstractmethod
-    # def act(self):
-    #     """
-    #     Select an action for evaluation.
-    #     If the agent has a replay-buffer, state and reward are stored.
-    #     Args:
-    #         state (rlil.environment.State): The environment state at the current timestep.
-    #         reward (torch.Tensor): The reward from the previous timestep.
-    #     Returns:
-    #         rllib.Action: The action to take at the current timestep.
-    #     """
     @abstractmethod
     def set_replay_buffer(self):
         """
@@ -87,11 +76,9 @@ class Clone(ABC):
         pass
 
 
-
-
 class BehavioralClone(Clone):
     """
-    Agent class for Sampler.
+    Clone class for Sampler.
     """
 
     def __init__(self,
@@ -140,11 +127,6 @@ class BehavioralClone(Clone):
         self.seed += 10000 * proc_id()
         torch.manual_seed(self.seed)
         np.random.seed(self.seed)
-
-        # for N step replay buffer
-        # self._n_step, self._discount_factor = get_n_step()
-        # if self._evaluation:
-        #     self._n_step = 1  # disable Nstep buffer when evaluation mode
 
     def set_replay_buffer(self, env, get_from_file):
 
@@ -322,11 +304,9 @@ class BehavioralClone(Clone):
                 logger.save_state({'env': env}, None)
 
         xs = list([i for i in range(0, self.clone_epochs, eval_every)])
-        # ys = [AVG_R, AVG_C]
         ys_expert_cost = list([1 * avg_expert_costs for _ in range(0, self.clone_epochs, eval_every)])
         ys_expert_reward = list([1 * avg_expert_rewards for _ in range(0, self.clone_epochs, eval_every)])
-        # ys = [AVG_R]
-        # zs = [AVG_C]
+
 
         ys_new = [AVG_R, ys_expert_reward]
         zs_new = [AVG_C, ys_expert_cost]
@@ -343,16 +323,9 @@ class BehavioralClone(Clone):
             {"costs over training": line_series(xs=xs, ys=zs_new, keys=cost_keys_mod,
                                                 title= tb_name + "Clone Costs while Training")})
 
-        # wandb.log({"rewards over training": line_series(xs=xs, ys=ys_new,
-        #                                                 keys=["Avg Clone Returns", "Avg Expert Returns"],
-        #                                                 title="Reward of Clones while Training")})
-        # wandb.log(
-        #     {"costs over training": line_series(xs=xs, ys=zs_new, keys=["Avg Clone Costs", "Avg Expert Costs"],
-        #                                         title="Cost of Clones while Training")})
-
         wandb.finish()
 
-    def run_clone_sim(self, env, record_clone, num_episodes, render):
+    def run_clone_sim(self, env, record_clone, num_episodes, render, input_vector=[1,0]):
         print(colorize("Running simulations of trained %s clone on %s environment over %d episodes" % (
         self.config_name, env, num_episodes),
                        'red', bold=True))
@@ -362,26 +335,38 @@ class BehavioralClone(Clone):
             wandb.login()
             wandb.init(project=self.benchmark_project_name, name=self.fname)
 
-            rew_mov_avg_10 = []
-            cost_mov_avg_10 = []
+            rew_mov_avg_10, cost_mov_avg_10, returns, costs = [], [], [], []
 
-            returns = []
-            costs = []
-
-            cum_ret = 0
-            cum_cost = 0
+            cum_ret, cum_cost = 0, 0
 
             # Play clone episodes
             for i in range(num_episodes):
-                obs = env.reset()
-                done = False
-                totalr = 0.
-                totalc = 0.
-                steps = 0
+                obs, done, totalr, totalc, steps = env.reset(), False, 0., 0., 0
 
                 while not done:
-                    a = self.clone_policy(torch.tensor(obs).float())
+                    if self.expert_type == 'single':
+                        a = self.clone_policy(torch.tensor(obs).float())
+                    else:
+                        # extend1 = [one_hot(np.array([v]), self.n_experts)] * np_states[~np_dones].shape[0]
+                        # print(input_vector)
 
+                        # print("OBS")
+                        # print(extend)
+                        # print(extend.shape)
+                        #
+                        # print("obs")
+                        # print(obs)
+                        # print(obs.shape)
+                        # appended_obs = np.append(obs, np.c_[extend], 0)
+
+
+                        extend = np.array(input_vector)
+                        appended_obs = np.append(obs, extend, 0)
+                        # print("appended")
+                        # print(appended_obs)
+
+                        # a = self.clone_policy(torch.tensor(obs).float())
+                        a = self.clone_policy(torch.tensor(appended_obs).float())
 
                     obs, r, done, info = env.step(a.detach().numpy())
                     cost = info['cost']
@@ -433,17 +418,10 @@ class BehavioralClone(Clone):
 
 
 class DistillBehavioralClone(BehavioralClone):
-    def __init__(self, config_name_list,
-                 input_vector,
-                 config_name,
-                 record_samples,
-                 clone_policy,
-                 optimizer,
-                 criterion,
-                 seed,
-                 expert_episodes,
-                 clone_epochs,
-                 replay_buffer_size):
+    def __init__(self, config_name_list, config_name,
+                 record_samples, clone_policy,
+                 optimizer, criterion,
+                 seed, expert_episodes,  clone_epochs, replay_buffer_size):
 
         super().__init__(
                  config_name,
@@ -457,10 +435,11 @@ class DistillBehavioralClone(BehavioralClone):
                  replay_buffer_size)
 
         self.config_name_list = config_name_list
+        self.n_experts = len(self.config_name_list)
         self.benchmark_project_name = 'distillppo_tests'
         self.table_name = ''
         self.expert_type = 'multiple'
-        self.input_vector = input_vector
+        # self.input_vector = input_vector
 
     def set_multiple_replay_buffers(self, env):
         print(self.config_name_list)
@@ -473,7 +452,10 @@ class DistillBehavioralClone(BehavioralClone):
 
         rb_list = []
 
+        # ix_vectors = [[0, 1], [1, 0]]
+        v = 0
         for x in self.config_name_list:
+
             _expert_demo_dir = os.path.join(self._expert_path, x + '_episodes/')
 
             f = open(_expert_demo_dir + 'sim_data_' + str(self.expert_episodes) + '_buffer.pkl', "rb")
@@ -482,65 +464,123 @@ class DistillBehavioralClone(BehavioralClone):
 
             data = samples_from_cpprb(npsamples=buffer_file)
 
-            # print("here is some data: ", data)
-
             # Reconstruct the data, then pass it to replay buffer
             np_states, np_rewards, np_actions, np_next_states, np_dones, np_next_dones = samples_to_np(data)
 
             # Create environment
             before_add = create_before_add_func(env)
 
+            # replay_buffer = ReplayBuffer(size=self.replay_buffer_size,
+            #                              env_dict={
+            #                                  "obs": {"shape": obs_dim},
+            #                                  "act": {"shape": act_dim},
+            #                                  "rew": {},
+            #                                  "next_obs": {"shape": obs_dim},
+            #                                  "done": {}})
+
+            # print(obs_dim)
+            # print(type(obs_dim))
+            # print()
+
             replay_buffer = ReplayBuffer(size=self.replay_buffer_size,
                                          env_dict={
-                                             "obs": {"shape": obs_dim},
+                                             "obs": {"shape": tuple([obs_dim[0]+2,])},
                                              "act": {"shape": act_dim},
                                              "rew": {},
-                                             "next_obs": {"shape": obs_dim},
+                                             "next_obs": {"shape": tuple([obs_dim[0]+2,])},
                                              "done": {}})
 
-            replay_buffer.add(**before_add(obs=np_states[~np_dones],
+            # print("hello")
+            # input_vector = [0, 1]
+
+            # print9
+
+            def one_hot(a, num_classes):
+                return np.squeeze(np.eye(num_classes)[a.reshape(-1)])
+
+            # print("one HOT mama")
+            # print(one_hot(np.array([0]), 2))
+
+            # Concatenate the states with one hot vectors depending on class
+            extend1 = [one_hot(np.array([v]), self.n_experts)] * np_states[~np_dones].shape[0]
+
+            appended_states = np.append(np_states[~np_dones], np.c_[extend1], 1)
+            appended_next_states = np.append(np_next_states[~np_dones], np.c_[extend1], 1)
+
+            # print("now trying cold mama")
+            # print(appended_states)
+            # print(ix_vectors[v])
+
+            # extend = [ix_vectors[v]] * np_states[~np_dones].shape[0]
+
+            # print("extendnew")
+            # print(extend1)
+            # print(type(extend1))
+            # print("extendold")
+            # print(extend)
+            # print(type(extend))
+
+
+            # appended_states = np.append(np_states[~np_dones], np.c_[extend], 1)
+            # appended_next_states = np.append(np_next_states[~np_dones], np.c_[extend], 1)
+
+
+
+            replay_buffer.add(**before_add(obs=appended_states,
                                            act=np_actions[~np_dones],
                                            rew=np_rewards[~np_dones],
-                                           next_obs=np_next_states[~np_dones],
+                                           next_obs=appended_next_states,
                                            done=np_next_dones[~np_dones]))
 
+
+
+            # replay_buffer.add(**before_add(obs=np_states[~np_dones],
+            #                                act=np_actions[~np_dones],
+            #                                rew=np_rewards[~np_dones],
+            #                                next_obs=np_next_states[~np_dones],
+            #                                done=np_next_dones[~np_dones]))
+
             rb_list.append(replay_buffer)
-
-            self.rb_list = rb_list
-
-            # print("here is the replay buffer size :", replay_buffer.get_buffer_size())
-
-        # print("we have finished adding the replay buffers")
-        # print(rb_list)
+            v += 1
+        self.rb_list = rb_list
 
 
+    def dualtrain_clone2(self, env, train_iters, batch_size, print_every=20, save_every=20, eval_sample_efficiency=False, eval_every=5, eval_episodes=20, exp_name= 'distilltest_rose_marigold_clone'):
 
-
-
-
-    def dualtrain_clone1(self, env, train_iters, batch_size, print_every=20, save_every=20, eval_sample_efficiency=False, eval_every=5, eval_episodes=20):
-        # AVG_R = []
-        # AVG_C = []
-        #
-        # tb_name = str(self.clone_epochs) + ' Epochs '
-
-        self.fname = 'distill_rose_marigold_clone'
-
-            # self.config_name + "_clone_" + str(self.clone_epochs) + 'ep_' + str(train_iters) + 'trn' + '_' + \
-            #          str(self.expert_episodes) + '_expert_runs'
+        self.fname = exp_name
 
         for epoch in range(self.clone_epochs):
             total_loss = 0
 
             for t in range(train_iters):
-                sample_states = []
-                sample_actions = []
+                # SAMPLE_LIST = []
 
-                # print(len(self.rb_list))
+                # for x in self.rb_list:
+                #     expert_sample = x.sample(batch_size)
+                    # SAMPLE_LIST.append(expert_sample)
+
+                # states_list = [sample['obs'] for sample in SAMPLE_LIST]
+                # actions_list = [sample['act'] for sample in SAMPLE_LIST]
+                # rewards_list = [sample['rew'] for sample in SAMPLE_LIST]
+
+                # states, actions = None, None
+                #
+                # for item in self.input_vector:
+                #
+                #     if states is None:
+                #         states = torch.tensor(states_list)*item
+                #         actions = torch.tensor(actions_list)*item
+                #     else:
+                #         states += torch.tensor(states_list)*item
+                #         actions += torch.tensor(actions_list)*item
+
+                # self.optimizer.zero_grad()
+                #
+                # # Policy loss
+                # a_pred = self.clone_policy(states.float())
+                # loss = self.criterion(a_pred, actions)
 
                 index = t % len(self.rb_list)
-                # print("t: ", t)
-                # print("index :", index)
 
                 SAMPLE = self.rb_list[index].sample(batch_size)
 
@@ -557,155 +597,10 @@ class DistillBehavioralClone(BehavioralClone):
                 total_loss += loss.item()
                 loss.backward()
                 if t % print_every == print_every - 1:
-                    print(
-                        colorize('Epoch:%d Batch:%d Loss:%.4f' % (epoch, t + 1, total_loss / print_every), 'yellow',
-                                 bold=True))
+                    print(colorize('Epoch:%d Batch:%d Loss:%.4f' % (epoch, t + 1, total_loss / print_every),
+                                   'yellow', bold=True))
                     epoch_metrics = {'Avg Epoch Loss': total_loss / print_every}
                     # wandb.log(epoch_metrics)
                     total_loss = 0
 
                 self.optimizer.step()
-
-            # if epoch % eval_every == eval_every - 1:
-            #     if eval_sample_efficiency:  # should we evaluate sample efficiency?
-            #
-            #         avg_expert_rewards = np.mean(expert_rewards)
-            #         avg_expert_costs = np.mean(expert_costs)
-            #
-            #         return_list, cost_list = [], []
-            #
-            #         for _ in range(eval_episodes):
-            #
-            #             obs, done, steps, ep_reward, ep_cost = env.reset(), False, 0, 0, 0
-            #
-            #             while not done:
-            #                 a = self.clone_policy(torch.tensor(obs).float())  # clone step
-            #                 obs, r, done, info = env.step(a.detach().numpy())
-            #                 cost = info['cost']
-            #
-            #                 ep_reward += r
-            #                 ep_cost += cost
-            #
-            #                 steps += 1
-            #                 if steps >= self.max_steps:
-            #                     break
-            #
-            #             return_list.append(ep_reward)
-            #             cost_list.append(ep_cost)
-            #
-            #         # AVG_R.append(np.mean(return_list))
-            #         # AVG_C.append(np.mean(cost_list))
-            #
-            #         best_metrics = {tb_name + 'Avg Return': np.mean(return_list),
-            #                         tb_name + 'Avg Cost': np.mean(cost_list)}
-            #         wandb.log(best_metrics)
-
-                # Save model and save last trajectory
-            # if (epoch % save_every == 0) or (epoch == self.clone_epochs - 1):
-            #     logger.save_state({'env': env}, None)
-
-            # xs = list([i for i in range(0, self.clone_epochs, eval_every)])
-            # # ys = [AVG_R, AVG_C]
-            # ys_expert_cost = list([1 * avg_expert_costs for _ in range(0, self.clone_epochs, eval_every)])
-            # ys_expert_reward = list([1 * avg_expert_rewards for _ in range(0, self.clone_epochs, eval_every)])
-            # ys = [AVG_R]
-            # zs = [AVG_C]
-
-            # ys_new = [AVG_R, ys_expert_reward]
-            # zs_new = [AVG_C, ys_expert_cost]
-            #
-            # rew_keys = ["Avg Clone Returns", "Avg Expert Returns"]
-            # cost_keys = ["Avg Clone Costs", "Avg Expert Costs"]
-            #
-            # rew_keys_mod = [tb_name + sub for sub in rew_keys]
-            # cost_keys_mod = [tb_name + sub for sub in cost_keys]
-            #
-            # wandb.log({"rewards over training": line_series(xs=xs, ys=ys_new, keys=rew_keys_mod,
-            #                                                 title=tb_name + "Clone Rewards while Training")})
-            # wandb.log(
-            #     {"costs over training": line_series(xs=xs, ys=zs_new, keys=cost_keys_mod,
-            #                                         title=tb_name + "Clone Costs while Training")})
-
-            # Sample from the replay buffer
-                # for x in self.rb_list:
-                #     SAMPLE = x.sample(batch_size)
-                #     sample_states.append(SAMPLE['obs'])
-                #     sample_actions.append(SAMPLE['act'])
-                    # print("here is a sample of actions from a replay buffer: ")
-                    # print(SAMPLE['act'])
-                    # print(type(SAMPLE['act']))
-
-                # print("added actions")
-                # print(sample_actions)
-                # # print("np")
-                # # print(np.ndarray(sample_actions))
-                #
-                # new_list = [val for pair in zip(sample_actions[0], sample_actions[1]) for val in pair]
-                # print("interleaving")
-                # print(new_list)
-
-
-
-                # # Observe states and chosen actions from expert seems rewards and
-                # # costs are not relevant here since clone will not receive them
-                # states = SAMPLE['obs']
-                # actions = SAMPLE['act']
-                #
-                # self.optimizer.zero_grad()
-                #
-                # # Policy loss
-                # a_pred = self.clone_policy(torch.tensor(states).float())
-                # loss = self.criterion(a_pred, torch.tensor(actions))
-
-            # print()
-            # self.replay_buffer = replay_buffer
-
-    def dualtrain_clone2(self, env, train_iters, batch_size, print_every=20, save_every=20, eval_sample_efficiency=False, eval_every=5, eval_episodes=20, exp_name= 'distilltest_rose_marigold_clone'):
-
-        self.fname = exp_name
-
-        for epoch in range(self.clone_epochs):
-            total_loss = 0
-
-            for t in range(train_iters):
-                SAMPLE_LIST = []
-
-                for x in self.rb_list:
-                    expert_sample = x.sample(batch_size)
-                    SAMPLE_LIST.append(expert_sample)
-
-                states_list = [sample['obs'] for sample in SAMPLE_LIST]
-                actions_list = [sample['act'] for sample in SAMPLE_LIST]
-                rewards_list = [sample['rew'] for sample in SAMPLE_LIST]
-
-                states = None
-                actions = None
-
-                for item in self.input_vector:
-                    if states is None:
-                        states = torch.tensor(states_list)*item
-                        actions = torch.tensor(actions_list)*item
-                    else:
-                        states += torch.tensor(states_list)*item
-                        actions += torch.tensor(actions_list)*item
-
-                self.optimizer.zero_grad()
-
-                # Policy loss
-                a_pred = self.clone_policy(states.float())
-                loss = self.criterion(a_pred, actions)
-
-                # print("Loss!", loss)
-                total_loss += loss.item()
-                loss.backward()
-                if t % print_every == print_every - 1:
-                    print(
-                        colorize('Epoch:%d Batch:%d Loss:%.4f' % (epoch, t + 1, total_loss / print_every), 'yellow',
-                                 bold=True))
-                    epoch_metrics = {'Avg Epoch Loss': total_loss / print_every}
-                    # wandb.log(epoch_metrics)
-                    total_loss = 0
-
-                self.optimizer.step()
-
-

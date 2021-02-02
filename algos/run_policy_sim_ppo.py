@@ -91,12 +91,6 @@ def run_policy(env, get_action, max_ep_len=None, num_episodes=100, render=True, 
     rew_mov_avg_10 = []
     cost_mov_avg_10 = []
 
-    # cum_ret = 0
-    # cum_cost = 0
-
-    print("obs dim:", obs_dim)
-    print("act dim:", act_dim)
-
     if benchmark:
         ep_costs = []
         ep_rewards = []
@@ -106,7 +100,7 @@ def run_policy(env, get_action, max_ep_len=None, num_episodes=100, render=True, 
         # 4 million env interactions
         wandb.init(project=record_project, name=record_name)
 
-        buf = CostPOBuffer(obs_dim, act_dim, local_steps_per_epoch, 0.99, 0.99)
+        # buf = CostPOBuffer(obs_dim, act_dim, local_steps_per_epoch, 0.99, 0.99)
 
         rb = ReplayBuffer(size=10000,
                           env_dict={
@@ -128,7 +122,7 @@ def run_policy(env, get_action, max_ep_len=None, num_episodes=100, render=True, 
         next_o, r, d, info = env.step(a)
 
         if record:
-            buf.store(next_o, a, r, None, info['cost'], None, None, None)
+            # buf.store(next_o, a, r, None, info['cost'], None, None, None)
             done_int = int(d==True)
             rb.add(obs=o, act=a, rew=r, next_obs=next_o, done=done_int)
 
@@ -148,7 +142,7 @@ def run_policy(env, get_action, max_ep_len=None, num_episodes=100, render=True, 
                 if not os.path.exists(data_path + config_name + '_episodes'):
                     os.makedirs(data_path + config_name + '_episodes')
 
-                buf = CostPOBuffer(obs_dim, act_dim, local_steps_per_epoch, 0.99, 0.99)
+                # buf = CostPOBuffer(obs_dim, act_dim, local_steps_per_epoch, 0.99, 0.99)
 
             if len(rew_mov_avg_10) >= 25:
                 rew_mov_avg_10.pop(0)
