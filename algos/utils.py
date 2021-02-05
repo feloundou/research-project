@@ -6,7 +6,7 @@ import torch
 import os.path as osp, time, atexit, os
 import warnings
 import torch.nn.functional as F
-from ppo_algos import *
+from neural_nets import *
 from torch import nn
 
 from mpi4py import MPI
@@ -961,3 +961,166 @@ def cg(Ax, b, cg_iters=10):
         p = r + (r_dot_new / r_dot_old) * p
         r_dot_old = r_dot_new
     return x
+
+
+
+
+# from https://github.com/joschu/modular_rl
+# http://www.johndcook.com/blog/standard_deviation/
+
+class RunningStat(object):
+    def __init__(self, shape):
+        self._n = 0
+        self._M = np.zeros(shape)
+        self._S = np.zeros(shape)
+    def push(self, x):
+        x = np.asarray(x)
+        assert x.shape == self._M.shape
+        self._n += 1
+        if self._n == 1:
+            self._M[...] = x
+        else:
+            oldM = self._M.copy()
+            self._M[...] = oldM + (x - oldM)/self._n
+            self._S[...] = self._S + (x - oldM)*(x - self._M)
+    @property
+    def n(self):
+        return self._n
+    @property
+    def mean(self):
+        return self._M
+    @property
+    def var(self):
+        return self._S/(self._n - 1) if self._n > 1 else np.square(self._M)
+    @property
+    def std(self):
+        return np.sqrt(self.var)
+    @property
+    def shape(self):
+        return self._M.shape
+
+
+class ZFilter:
+    """
+    y = (x-mean)/std
+    using running estimates of mean,std
+    """
+
+    def __init__(self, shape, demean=True, destd=True, clip=10.0):
+        self.demean = demean
+        self.destd = destd
+        self.clip = clip
+
+        self.rs = RunningStat(shape)
+
+    def __call__(self, x, update=True):
+        if update: self.rs.push(x)
+
+        if self.demean:
+            x = x - self.rs.mean
+
+        if self.destd:
+            x = x / (self.rs.std + 1e-8)
+
+        if self.clip:
+            x = np.clip(x, -self.clip, self.clip)
+
+        return x
+
+
+
+
+def fc_q(env, hidden1=400, hidden2=300):
+    return nn.Sequential(
+        nn.Linear(env.state_space.shape[0] +
+                  env.action_space.shape[0], hidden1),
+        nn.LeakyReLU(),
+        nn.Linear(hidden1, hidden2),
+        nn.LeakyReLU(),
+        nn.Linear(hidden2, 1),
+    )
+
+
+def fc_v(env, hidden1=400, hidden2=300):
+    return nn.Sequential(
+        nn.Linear(env.state_space.shape[0], hidden1),
+        nn.LeakyReLU(),
+        nn.Linear(hidden1, hidden2),
+        nn.LeakyReLU(),
+        nn.Linear(hidden2, 1),
+    )
+
+
+def fc_deterministic_policy(env, hidden1=400, hidden2=300):
+    return nn.Sequential(
+        nn.Linear(env.state_space.shape[0], hidden1),
+        nn.LeakyReLU(),
+        nn.Linear(hidden1, hidden2),
+        nn.LeakyReLU(),
+        nn.Linear(hidden2, env.action_space.shape[0]),
+    )
+
+
+def fc_deterministic_noisy_policy(env, hidden1=400, hidden2=300):
+    return nn.Sequential(
+        nn.NoisyFactorizedLinear(env.state_space.shape[0], hidden1),
+        nn.LeakyReLU(),
+        nn.NoisyFactorizedLinear(hidden1, hidden2),
+        nn.LeakyReLU(),
+        nn.NoisyFactorizedLinear(hidden2, env.action_space.shape[0]),
+    )
+
+
+def fc_soft_policy(env, hidden1=400, hidden2=300):
+    return nn.Sequential(
+        nn.Linear(env.state_space.shape[0], hidden1),
+        nn.LeakyReLU(),
+        nn.Linear(hidden1, hidden2),
+        nn.LeakyReLU(),
+        nn.Linear(hidden2, env.action_space.shape[0] * 2),
+    )
+
+
+def fc_actor_critic(env, hidden1=400, hidden2=300):
+    features = nn.Sequential(
+        nn.Linear(env.state_space.shape[0], hidden1),
+        nn.LeakyReLU(),
+    )
+
+    v = nn.Sequential(
+        nn.Linear(hidden1, hidden2),
+        nn.LeakyReLU(),
+        nn.Linear(hidden2, 1)
+    )
+
+    policy = nn.Sequential(
+        nn.Linear(hidden1, hidden2),
+        nn.LeakyReLU(),
+        nn.Linear(hidden2, env.action_space.shape[0] * 2)
+    )
+
+    return features, v, policy
+
+
+def fc_discriminator(env, hidden1=400, hidden2=300):
+    return nn.Sequential(
+        nn.Linear(env.state_space.shape[0] + env.action_space.shape[0],
+                  hidden1),
+        nn.LeakyReLU(),
+        nn.Linear(hidden1, hidden2),
+        nn.LeakyReLU(),
+        nn.Linear(hidden2, 1),
+        nn.Sigmoid())
+
+
+def fc_reward(env, hidden1=400, hidden2=300):
+    return nn.Sequential(
+        nn.Linear(env.state_space.shape[0] +
+                  env.action_space.shape[0], hidden1),
+        nn.LeakyReLU(),
+        nn.Linear(hidden1, hidden2),
+        nn.LeakyReLU(),
+        nn.Linear(hidden2, 1)
+    )
+
+

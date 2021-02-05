@@ -1,5 +1,5 @@
 from utils import *
-from ppo_algos import *
+from neural_nets import *
 
 # args = get_args()
 

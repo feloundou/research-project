@@ -100,8 +100,6 @@ def run_policy(env, get_action, max_ep_len=None, num_episodes=100, render=True, 
         # 4 million env interactions
         wandb.init(project=record_project, name=record_name)
 
-        # buf = CostPOBuffer(obs_dim, act_dim, local_steps_per_epoch, 0.99, 0.99)
-
         rb = ReplayBuffer(size=10000,
                           env_dict={
                               "obs": {"shape": obs_dim},
@@ -110,7 +108,7 @@ def run_policy(env, get_action, max_ep_len=None, num_episodes=100, render=True, 
                               "next_obs": {"shape": obs_dim},
                               "done": {}})
 
-        columns = ['observation', 'action', 'reward', 'cost', 'done']
+        # columns = ['observation', 'action', 'reward', 'cost', 'done']
         # sim_data = pd.DataFrame(index=[0], columns=columns)
 
     while n < num_episodes:

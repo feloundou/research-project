@@ -5,6 +5,8 @@ ppo_lagrange_kwargs = dict(
     learn_penalty=True, penalty_param_loss=True  # Irrelevant in unconstrained
 )
 
+standard_config = dict(name='standard', penalty_lr=0.025, cost_lim=50, gamma=0.99, lam=0.98, seed=0, steps=5000, hid=128, l=4)
+
 
 scarlet_config = dict(name='scarlet',penalty_lr=0.025, cost_lim=25, gamma=0.985, lam=0.98, seed=0, steps=8000, hid=128, l=2)
 

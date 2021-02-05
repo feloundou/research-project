@@ -13,7 +13,7 @@ from buffer_torch import *
 from models_torch import MLP_DiagGaussianPolicy, MLP
 
 from utils import *
-from ppo_algos import *
+from neural_nets import *
 
 import wandb
 wandb.login()

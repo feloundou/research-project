@@ -2,6 +2,7 @@ import sys
 import torch
 from torch.optim import Adam
 from adabelief_pytorch import AdaBelief
+import math
 
 import gym
 import safety_gym
@@ -10,13 +11,18 @@ import safety_gym
 from utils import *
 from neural_nets import *
 from agent_types import *
+import pickle
 
 import wandb
 
+import numpy as np
+
+from utils import *
 
 # Define PPO functions
-def ppo(env_fn,
+def vail(env_fn,
         actor_critic=MLPActorCritic,
+        discrim = Discriminator,
         agent=PPOAgent(),
         ac_kwargs=dict(),
         seed=0,
@@ -43,6 +49,9 @@ def ppo(env_fn,
         # Policy Learning:
         pi_lr=3e-4,
         train_pi_iters=100,
+        # Discriminator Learning:
+        discrim_lr= 1e-3,
+        train_discrim_iters=100,
         # Clipping
         clip_ratio=0.2,
         logger_kwargs=dict(),
@@ -91,13 +100,17 @@ def ppo(env_fn,
     # W&B Logging
     wandb.login()
 
+    # config_name = 'marigold-gail'
+    config_name = 'marigold'
+
+    # train_discriminator = True
+
     composite_name = 'ppo_penalized_' + config_name + '_' + str(int(steps_per_epoch/1000)) + \
                      'Ks_' + str(epochs) + 'e_' + str(ac_kwargs['hidden_sizes'][0]) + 'x' + \
                      str(len(ac_kwargs['hidden_sizes']))
 
     # 4 million env interactions
-    # wandb.init(project="ppo-experts-1000epochs", name=composite_name)
-    wandb.init(project="gail-experts-1000epochs", group="full_runs", name=composite_name)
+    wandb.init(project="vail-experts-1000epochs", group="full_runs", name='vail_'+composite_name)
 
     # Special function to avoid certain slowdowns from PyTorch + MPI combo.
     setup_pytorch_for_mpi()
@@ -114,45 +127,83 @@ def ppo(env_fn,
     # Instantiate environment
     env = env_fn()
 
+
+    # Paths
+    _project_dir = '/home/tyna/Documents/openai/research-project/'
+    _root_data_path = _project_dir + 'data/'
+    _expert_path = _project_dir + 'expert_data/'
+    _clone_path = _project_dir + 'clone_data/'
+    _demo_dir = os.path.join(_expert_path, config_name + '_episodes/')
+
+    # load demonstrations
+    # expert_demo, _ = pickle.load(open('./expert_demo/expert_demo.p', "rb"))
+    # demonstrations = np.array(expert_demo)
+    # print("demonstrations.shape", demonstrations.shape)
+
+    f = open(_demo_dir + 'sim_data_' + str(1000) + '_buffer.pkl', "rb")
+    buffer_file = pickle.load(f)
+    f.close()
+
+    expert_demonstrations = samples_from_cpprb(npsamples=buffer_file)
+
+    # Reconstruct the data, then pass it to replay buffer
+    np_states, np_rewards, np_actions, np_next_states, np_dones, np_next_dones = samples_to_np(expert_demonstrations)
+
     print("constraints in the environment")
     print("constrain hazards: ", env.constrain_hazards)
     print("hazards cost: ", env.hazards_cost)
 
+
+
+
+
     obs_dim = env.observation_space.shape
     act_dim = env.action_space.shape
+    running_state = ZFilter((obs_dim[0],), clip=1)
+
 
     # Create actor-critic module and monitor it
     ac = actor_critic(env.observation_space, env.action_space, **ac_kwargs)
-    # print("KWARGS")
-    # print(ac_kwargs)
-    # wandb.watch(ac)
+    discrim = discrim(env.observation_space, env.action_space, **ac_kwargs)
 
     # Sync params across processes
     sync_params(ac)
+    # Note, also sync for Discriminator
+    sync_params(discrim)
 
     # Count variables
-    var_counts = tuple(count_vars(module) for module in [ac.pi, ac.v])
-    logger.log('\nNumber of parameters: \t pi: %d, \t v: %d\n' % var_counts)
+    var_counts = tuple(count_vars(module) for module in [ac.pi, ac.v, discrim])
+    logger.log('\nNumber of parameters: \t pi: %d, \t v: %d, \t discrim: %d \n' % var_counts)
 
-    # print("Agent parameters")
-    # print("Learn penalty:", agent.learn_penalty)
-    # print("Use penalty:", agent.use_penalty)
-    # print("Objective penalized:", agent.objective_penalized)
-    # print("Reward penalized:", agent.reward_penalized)
+    z_filter = False
 
     # Set up experience buffer
     local_steps_per_epoch = int(steps_per_epoch / num_procs())
-    # buf = PPOBuffer(obs_dim, act_dim, local_steps_per_epoch, gamma, lam)
     buf = CostPOBuffer(obs_dim, act_dim, local_steps_per_epoch, gamma, lam, cost_gamma, cost_lam)
 
     # Set up optimizers for policy and value function
-    pi_optimizer = Adam(ac.pi.parameters(), lr=pi_lr)
-    vf_optimizer = Adam(ac.v.parameters(), lr=vf_lr)
+    # pi_optimizer = Adam(ac.pi.parameters(), lr=pi_lr)
+    # vf_optimizer = Adam(ac.v.parameters(), lr=vf_lr)
+    # discrim_optimizer = Adam(discrim.parameters(), lr=discrim_lr)
+    pi_optimizer = AdaBelief(ac.pi.parameters(), betas=(0.9, 0.999), eps=1e-8)
+    vf_optimizer = AdaBelief(ac.v.parameters(), betas=(0.9, 0.999), eps=1e-8)
+    discrim_optimizer = AdaBelief(discrim.parameters(), betas=(0.9, 0.999), eps=1e-8)
+
+    # self.value_fun_optimizer = AdaBelief(self.value_fun.parameters(), betas=(0.9, 0.999), eps=1e-8)
+    # self.cost_fun_optimizer = AdaBelief(self.cost_fun.parameters(), betas=(0.9, 0.999), eps=1e-8)
 
     penalty = np.log(max(np.exp(penalty_init)-1, 1e-8))
 
     mov_avg_ret = 0
     mov_avg_cost = 0
+
+    # Discriminator reward
+    def get_reward(discrim, state, action):
+        state = torch.Tensor(state)
+        action = torch.Tensor(action)
+        state_action = torch.cat([state, action])
+        with torch.no_grad():
+            return -math.log(discrim(state_action)[0].item())
 
     # Set up function for computing PPO policy loss
     def compute_loss_pi(data):
@@ -179,12 +230,46 @@ def ppo(env_fn,
         v_loss = ((ac.v(obs) - ret) ** 2).mean()
         return v_loss
 
+    def compute_loss_discrim(data, demonstrations, acc=False):
+        # memory = np.array(memory)
+        # states = np.vstack(memory[:, 0])
+        # actions = list(memory[:, 1])
+        obs = data['obs']
+        act = data['act']
+
+        # states = torch.Tensor(states)
+        # actions = torch.Tensor(actions)
+
+        criterion = torch.nn.BCELoss()
+
+        # change demo format
+        demonstrations = torch.Tensor(demonstrations)
+
+        # Pass both expert and learner through discriminator
+        learner = discrim(torch.cat([obs, act], dim=1))
+        expert = discrim(demonstrations)
+
+        learner_acc = (learner  > 0.5).float().mean()
+        expert_acc = (expert < 0.5).float().mean()
+
+        discrim_loss = criterion(learner, torch.ones((obs.shape[0], 1))) + \
+                       criterion(expert, torch.zeros((demonstrations.shape[0], 1)))
+
+        if acc:
+            return discrim_loss, expert_acc, learner_acc
+        else:
+            return discrim_loss
+
+
     # Set up model saving
     logger.setup_pytorch_saver(ac)
 
     penalty_init_param = np.log(max(np.exp(penalty_init) - 1, 1e-8))
 
-    def update(cur_penalty):
+    TRAIN_DISC = True
+
+    def update(cur_penalty, TRAIN_DISC):
+
         cur_cost = logger.get_stats('EpCost')[0]
         cur_rew = logger.get_stats('EpRet')[0]
 
@@ -208,10 +293,24 @@ def ppo(env_fn,
 
         data = buf.get()
 
-
         pi_l_old, pi_info_old = compute_loss_pi(data)
+
         pi_l_old = pi_l_old.item()
         v_l_old = compute_loss_v(data).item()
+        # discrim_l_old = compute_loss_discrim(data, expert_demonstrations).item()
+        # print("data shape")
+        # print(data['obs'].shape)
+        # print("states shape")
+        # print(np_states.shape)
+        # print("obs shape")
+        # print(np_actions.shape)
+
+        # print("combined shape")
+        combined_expert_demos = np.concatenate((np_states, np_actions), axis=1)
+        # print(comb.shape)
+        # print(comb.shape)
+        # discrim_l_old = compute_loss_discrim(data, np_states).item()
+        discrim_l_old = compute_loss_discrim(data, combined_expert_demos, acc=False).item()
 
         # Train policy with multiple steps of gradient descent
         for i in range(train_pi_iters):
@@ -232,6 +331,38 @@ def ppo(env_fn,
             mpi_avg_grads(ac.v)  # average grads across MPI processes
             vf_optimizer.step()
 
+        # Discriminator learning
+        if TRAIN_DISC:
+            for i in range(train_discrim_iters):
+                discrim_optimizer.zero_grad()
+                # loss_discrim = compute_loss_discrim(data, expert_demonstrations)
+                loss_discrim, expert_acc, learner_acc = compute_loss_discrim(data, combined_expert_demos, acc=True)
+                print("discriminator loss: ", loss_discrim)
+                loss_discrim.backward()
+                mpi_avg_grads(discrim)  # average grads across MPI processes
+                discrim_optimizer.step()
+
+            if expert_acc.item() > 0.99 and learner_acc.item() > 0.98:
+                # train_discriminator = False
+                # print("hello")
+                TRAIN_DISC = False
+
+
+
+                # expert_acc = ((discrim(combined_expert_demos) < 0.5).float()).mean()
+                # learner_acc = ((discrim(torch.cat([data['obs'], data['act']], dim=1)) > 0.5).float()).mean()
+
+                # learner = discrim(torch.cat([obs, act], dim=1))
+                #
+                # print("expert acc: ", expert_acc.item())
+                # print("learning acc: ", learner_acc.item())
+
+            # expert_acc, learner_acc = train_discrim(discrim, memory, discrim_optim, demonstrations, args)
+            # print("Expert: %.2f%% | Learner: %.2f%%" % (expert_acc * 100, learner_acc * 100))
+            # if expert_acc > args.suspend_accu_exp and learner_acc > args.suspend_accu_gen:
+            #     train_discrim_flag = False
+
+
         # Penalty update
         print("old penalty: ", cur_penalty)
         cur_penalty = max(0, cur_penalty + penalty_lr*(cur_cost - cost_lim))
@@ -240,9 +371,12 @@ def ppo(env_fn,
         # Log changes from update
         kl, ent, cf = pi_info['kl'], pi_info_old['ent'], pi_info['cf']
         logger.store(LossPi=pi_l_old, LossV=v_l_old,
+                     LossDiscrim=discrim_l_old,
                      KL=kl, Entropy=ent, ClipFrac=cf,
                      DeltaLossPi=(loss_pi.item() - pi_l_old),
-                     DeltaLossV=(loss_v.item() - v_l_old))
+                     DeltaLossV=(loss_v.item() - v_l_old),
+                     # DeltaLossDiscrim=(loss_discrim.item() - discrim_l_old)
+                     )
 
         vf_loss_avg = mpi_avg(v_l_old)
         pi_loss_avg = mpi_avg(pi_l_old)
@@ -255,11 +389,14 @@ def ppo(env_fn,
                           }
 
         wandb.log(update_metrics)
-        return cur_penalty
+        # return cur_penalty, train_discriminator
+        return cur_penalty, TRAIN_DISC
 
     # Prepare for interaction with environment
     start_time = time.time()
     o, r, d, c, ep_ret, ep_cost, ep_len, cum_cost, cum_reward = env.reset(), 0, False, 0, 0, 0, 0, 0, 0
+
+
     rew_mov_avg_10 = []
     cost_mov_avg_10 = []
 
@@ -269,11 +406,27 @@ def ppo(env_fn,
     for epoch in range(epochs):
 
         for t in range(local_steps_per_epoch):
+            state = running_state(o)
+            #
+            # print("filtered observations")
+            # print(state)
+            # print("unfiltered observations")
+            # print(o)
 
-            a, v, vc, logp = ac.step(torch.as_tensor(o, dtype=torch.float32))
+            if z_filter:
+                a, v, vc, logp = ac.step(torch.as_tensor(state, dtype=torch.float32))
+            else:
+                a, v, vc, logp = ac.step(torch.as_tensor(o, dtype=torch.float32))
+
 
             # env.step => Take action
             next_o, r, d, info = env.step(a)
+
+            if z_filter:
+                next_o = running_state(next_o)
+
+
+            irl_reward = get_reward(discrim, o, a)
 
             # Include penalty on cost
             c = info.get('cost', 0)
@@ -289,7 +442,13 @@ def ppo(env_fn,
             r_total = r - cur_penalty * c
             r_total /= (1 + cur_penalty)
 
-            buf.store(o, a, r_total, v, 0, 0, logp, info)
+            irl_updated = irl_reward - cur_penalty*c
+            irl_updated /= (1 + cur_penalty)
+
+
+            # buf.store(o, a, r_total, v, 0, 0, logp, info)  # modify
+            # buf.store(o, a, irl_reward, v, 0, 0, logp, info)
+            buf.store(o, a, irl_updated, v, 0, 0, logp, info)
 
             # save and log
             logger.store(VVals=v)
@@ -307,6 +466,10 @@ def ppo(env_fn,
                 # if trajectory didn't reach terminal state, bootstrap value target
                 if timeout or epoch_ended:
                     _, v, _, _ = ac.step(torch.as_tensor(o, dtype=torch.float32))
+                    # if z_filter:
+                    #     _, v, _, _ = ac.step(torch.as_tensor(state, dtype=torch.float32))
+                    # else:
+
                     last_v = v
                     last_vc = 0
 
@@ -336,7 +499,7 @@ def ppo(env_fn,
             logger.save_state({'env': env}, None)
 
         # Perform PPO update!
-        cur_penalty = update(cur_penalty)
+        cur_penalty, TRAIN_DISC = update(cur_penalty, TRAIN_DISC)
 
         #  Cumulative cost calculations
         cumulative_cost = mpi_sum(cum_cost)
@@ -358,8 +521,10 @@ def ppo(env_fn,
         logger.log_tabular('TotalEnvInteracts', (epoch + 1) * steps_per_epoch)
         logger.log_tabular('LossPi', average_only=True)
         logger.log_tabular('LossV', average_only=True)
+        # logger.log_tabular('LossDiscrim', average_only=True)
         logger.log_tabular('DeltaLossPi', average_only=True)
         logger.log_tabular('DeltaLossV', average_only=True)
+        # logger.log_tabular('DeltaLossDiscrim', average_only=True)
         logger.log_tabular('Entropy', average_only=True)
         logger.log_tabular('KL', average_only=True)
         logger.log_tabular('ClipFrac', average_only=True)
@@ -404,7 +569,7 @@ def main(config):
     logger_kwargs = setup_logger_kwargs(composite_name, args.seed)
 
     # Run experiment
-    ppo(lambda: gym.make(args.env),
+    vail(lambda: gym.make(args.env),
         actor_critic=MLPActorCritic,
         agent=PPOAgent(),
         ac_kwargs=dict(hidden_sizes=[config['hid']] * config['l']),
@@ -426,8 +591,7 @@ if __name__ == '__main__':
 
     exec(open('nn_config.py').read())
 
-    # main(peony_config)
-
     main(standard_config)
+
 
 # keep cost limits below 60-80

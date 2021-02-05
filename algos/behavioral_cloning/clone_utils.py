@@ -1,15 +1,12 @@
 from abc import ABC, abstractmethod
 from cpprb import ReplayBuffer, create_before_add_func
 import wandb
-import numpy as np
 
 import pickle
 from utils import *
-from ppo_algos import *
+from neural_nets import *
 
 from six.moves.collections_abc import Sequence
-
-
 from run_policy_sim_ppo import load_policy_and_env, run_policy
 
 # Representation utils
@@ -351,25 +348,9 @@ class BehavioralClone(Clone):
                     if self.expert_type == 'single':
                         a = self.clone_policy(torch.tensor(obs).float())
                     else:
-                        # extend1 = [one_hot(np.array([v]), self.n_experts)] * np_states[~np_dones].shape[0]
-                        # print(input_vector)
-
-                        # print("OBS")
-                        # print(extend)
-                        # print(extend.shape)
-                        #
-                        # print("obs")
-                        # print(obs)
-                        # print(obs.shape)
-                        # appended_obs = np.append(obs, np.c_[extend], 0)
-
-
                         extend = np.array(input_vector)
                         appended_obs = np.append(obs, extend, 0)
-                        # print("appended")
-                        # print(appended_obs)
 
-                        # a = self.clone_policy(torch.tensor(obs).float())
                         a = self.clone_policy(torch.tensor(appended_obs).float())
 
                     obs, r, done, info = env.step(a.detach().numpy())
@@ -415,9 +396,6 @@ class BehavioralClone(Clone):
             print('Std EpCost', np.std(costs))
 
 
-
-
-
 ######################################################################################
 
 
@@ -456,7 +434,6 @@ class DistillBehavioralClone(BehavioralClone):
 
         rb_list = []
 
-        # ix_vectors = [[0, 1], [1, 0]]
         v = 0
         for x in self.config_name_list:
 
@@ -474,18 +451,6 @@ class DistillBehavioralClone(BehavioralClone):
             # Create environment
             before_add = create_before_add_func(env)
 
-            # replay_buffer = ReplayBuffer(size=self.replay_buffer_size,
-            #                              env_dict={
-            #                                  "obs": {"shape": obs_dim},
-            #                                  "act": {"shape": act_dim},
-            #                                  "rew": {},
-            #                                  "next_obs": {"shape": obs_dim},
-            #                                  "done": {}})
-
-            # print(obs_dim)
-            # print(type(obs_dim))
-            # print()
-
             replay_buffer = ReplayBuffer(size=self.replay_buffer_size,
                                          env_dict={
                                              "obs": {"shape": tuple([obs_dim[0]+2,])},
@@ -502,22 +467,11 @@ class DistillBehavioralClone(BehavioralClone):
             appended_states = np.append(np_states[~np_dones], np.c_[extend1], 1)
             appended_next_states = np.append(np_next_states[~np_dones], np.c_[extend1], 1)
 
-
-
-
             replay_buffer.add(**before_add(obs=appended_states,
                                            act=np_actions[~np_dones],
                                            rew=np_rewards[~np_dones],
                                            next_obs=appended_next_states,
                                            done=np_next_dones[~np_dones]))
-
-
-
-            # replay_buffer.add(**before_add(obs=np_states[~np_dones],
-            #                                act=np_actions[~np_dones],
-            #                                rew=np_rewards[~np_dones],
-            #                                next_obs=np_next_states[~np_dones],
-            #                                done=np_next_dones[~np_dones]))
 
             rb_list.append(replay_buffer)
             v += 1

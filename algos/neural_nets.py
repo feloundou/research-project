@@ -90,6 +90,9 @@ class MLPActorCritic(nn.Module):
 
     def __init__(self, observation_space, action_space,
                  hidden_sizes=(64, 64), activation=nn.Tanh):
+
+    # def __init__(self, observation_space, action_space,
+    #              hidden_sizes=(64, 64), activation=nn.LeakyReLU):
         super().__init__()
 
         obs_dim = observation_space.shape[0]
@@ -150,15 +153,59 @@ class DistilledGaussianActor(nn.Module):
     def forward(self, x):
 
         out = F.leaky_relu(self.shared_net(x))
-        # print("out matrix")
-        # print(out)
-        # print("mu")
         mu = self.mu_net(out)
-        # print(mu)
-        # print("std out")
         std = self.var_net(out)
-        # print(std)
 
-        # mu = self.mu_net(F.leaky_relu(self.shared_net(x)))
-        # std = self.var_net(F.leaky_relu(self.shared_net(x)))
         return Normal(loc=mu, scale=std).rsample()
+
+class Discriminator(nn.Module):
+    def __init__(self, obs_space, act_space, hidden_sizes, activation=nn.Tanh):
+        super().__init__()
+        obs_dim = obs_space.shape[0]
+        act_dim = act_space.shape[0]
+        discrim_dim = obs_dim + act_dim
+        self.discrim_net = mlp([discrim_dim] + list(hidden_sizes) + [1], activation)
+
+
+    def forward(self, obs):
+        prob = torch.sigmoid(self.discrim_net(obs))
+        return prob
+
+
+class VDB(nn.Module):
+    # def __init__(self, num_inputs, args):
+    def __init__(self, obs_space, act_space, hidden_sizes, activation=nn.Tanh):
+        super(VDB, self).__init__()
+        obs_dim = obs_space.shape[0]
+        act_dim = act_space.shape[0]
+        discrim_dim = obs_dim + act_dim
+        z_size = 128
+
+        # self.fc1 = nn.Linear(num_inputs, args.hidden_size)
+        self.fc1 = nn.Linear(discrim_dim, hidden_sizes[0])
+        self.fc2 = nn.Linear(hidden_sizes[0], z_size)
+        self.fc3 = nn.Linear(hidden_sizes[0], z_size)
+        self.fc4 = nn.Linear(z_size, hidden_sizes[0])
+        self.fc5 = nn.Linear(hidden_sizes[0], 1)
+
+        self.fc5.weight.data.mul_(0.1)
+        self.fc5.bias.data.mul_(0.0)
+
+    def encoder(self, x):
+        h = torch.tanh(self.fc1(x))
+        return self.fc2(h), self.fc3(h)
+
+    def reparameterize(self, mu, logvar):
+        std = torch.exp(logvar / 2)
+        eps = torch.randn_like(std)
+        return mu + std * eps
+
+    def discriminator(self, z):
+        h = torch.tanh(self.fc4(z))
+        return torch.sigmoid(self.fc5(h))
+
+    def forward(self, x):
+        mu, logvar = self.encoder(x)
+        z = self.reparameterize(mu, logvar)
+        prob = self.discriminator(z)
+        return prob, mu, logvar
