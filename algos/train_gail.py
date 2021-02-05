@@ -9,7 +9,7 @@ import safety_gym
 # from safety_gym.envs.engine import Engine
 
 from utils import *
-from neural_nets import *
+from neural_nets import Discriminator
 from agent_types import *
 import pickle
 
@@ -323,9 +323,8 @@ def gail(env_fn,
                 mpi_avg_grads(discrim)  # average grads across MPI processes
                 discrim_optimizer.step()
 
-            if expert_acc.item() > 0.99 and learner_acc.item() > 0.98:
+            if expert_acc.item() > 0.99 and learner_acc.item() > 0.99:
                 TRAIN_DISC = False
-
 
 
         # Penalty update
@@ -360,7 +359,6 @@ def gail(env_fn,
     # Prepare for interaction with environment
     start_time = time.time()
     o, r, d, c, ep_ret, ep_cost, ep_len, cum_cost, cum_reward = env.reset(), 0, False, 0, 0, 0, 0, 0, 0
-
 
     rew_mov_avg_10 = []
     cost_mov_avg_10 = []
@@ -426,10 +424,6 @@ def gail(env_fn,
                 # if trajectory didn't reach terminal state, bootstrap value target
                 if timeout or epoch_ended:
                     _, v, _, _ = ac.step(torch.as_tensor(o, dtype=torch.float32))
-                    # if z_filter:
-                    #     _, v, _, _ = ac.step(torch.as_tensor(state, dtype=torch.float32))
-                    # else:
-
                     last_v = v
                     last_vc = 0
 
@@ -508,7 +502,7 @@ def main(config):
     # parser.add_argument('--cpu', type=int, default=4)
     parser.add_argument('--cpu', type=int, default=1)
     parser.add_argument('--steps', type=int, default=8000)
-    parser.add_argument('--epochs', type=int, default=50)
+    parser.add_argument('--epochs', type=int, default=200)
     parser.add_argument('--cost_lim', type=float, default=25)
     # parser.add_argument('--penalty_lr', type=float, default=0.04)
     parser.add_argument('--config_name', type=str, default='standard')

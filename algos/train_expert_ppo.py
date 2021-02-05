@@ -208,7 +208,6 @@ def ppo(env_fn,
 
         data = buf.get()
 
-
         pi_l_old, pi_info_old = compute_loss_pi(data)
         pi_l_old = pi_l_old.item()
         v_l_old = compute_loss_v(data).item()

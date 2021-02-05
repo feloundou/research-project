@@ -457,6 +457,9 @@ class Logger:
                 # something different for your personal PyTorch project.
                 # We use a catch_warnings() context to avoid the warnings about
                 # not being able to save the source code.
+                # print("what are the elements here")
+                # print(self.pytorch_saver_elements)
+                # print(fname)
                 torch.save(self.pytorch_saver_elements, fname)
 
     def dump_tabular(self):
